@@ -46,7 +46,7 @@ public class PreviewPane extends JPanel {
                     RenderingHints renderingHints = new RenderingHints(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                     renderer.setRenderingHints(renderingHints);
 
-                    for (int i = 0; i < 3 && i < document.getNumberOfPages(); i++) {
+                    for (int i = 0; i < 2 && i < this.documentProxy.pageCount; i++) {
                         if (stop || documentProxy.stopProcessing)
                             break;
                         BufferedImage image = renderer.renderImageWithDPI(i, 300);
@@ -54,6 +54,7 @@ public class PreviewPane extends JPanel {
                         page.nr = i + 1;
                         page.image = image;
                         page.scale = 0;
+                        page.pageCount = this.documentProxy.pageCount;
                         publish(page);
                     }
                 }
@@ -98,6 +99,7 @@ public class PreviewPane extends JPanel {
     protected static class Page {
         BufferedImage image;
         int nr;
+        int pageCount;
         double scale;
     }
 
@@ -163,7 +165,7 @@ public class PreviewPane extends JPanel {
         int drawHeight = space;
 
         for (Page i : tmp) {
-            drawHeight += (i.image.getHeight() * i.scale) + space;
+            drawHeight += (int) ((i.image.getHeight() * i.scale) + space);
         }
 
         return new Dimension(drawWidth, drawHeight);
@@ -178,9 +180,9 @@ public class PreviewPane extends JPanel {
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
         int panelWidth = getTargetWidth();
+        FontMetrics fm = g2d.getFontMetrics();
 
         if (error != null) {
-            FontMetrics fm = g2d.getFontMetrics();
             int y = space + fm.getAscent();
             for (String line : error.split("\n")) {
                 g2d.drawString(line, space, y);
@@ -194,9 +196,13 @@ public class PreviewPane extends JPanel {
             tmp = new ArrayList<>(PreviewPane.this.pages);
         }
 
+        int pageCount = -1;
+
         int y = space;
         for (Page i : tmp) {
             if (i.scale > 0) {
+                pageCount = i.pageCount;
+
                 int imgWidth = i.image.getWidth();
                 int imgHeight = i.image.getHeight();
 
@@ -207,6 +213,12 @@ public class PreviewPane extends JPanel {
                 g2d.drawImage(i.image, x, y, drawWidth, drawHeight, null);
                 y += drawHeight + space;
             }
+        }
+
+        if (pageCount > tmp.size()) {
+            y = space + fm.getAscent();
+            g2d.setPaint(Color.BLACK);
+            g2d.drawString("Showing first " + tmp.size() + " of " + pageCount + " Pages", space, y);
         }
     }
 }

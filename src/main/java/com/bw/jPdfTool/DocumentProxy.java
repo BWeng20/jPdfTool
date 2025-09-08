@@ -13,6 +13,7 @@ public class DocumentProxy {
 
     public Path file;
     private PDDocument document;
+    public int pageCount = -1;
     public boolean stopProcessing = false;
     public String owerPassword4Load;
 
@@ -21,10 +22,12 @@ public class DocumentProxy {
     }
 
     public synchronized PDDocument getDocument() throws IOException {
-        if (document == null)
+        if (document == null) {
             document = owerPassword4Load != null
                     ? Loader.loadPDF(file.toFile(), owerPassword4Load)
                     : Loader.loadPDF(file.toFile());
+            pageCount = document.getNumberOfPages();
+        }
         return document;
     }
 
