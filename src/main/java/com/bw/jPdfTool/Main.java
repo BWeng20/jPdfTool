@@ -9,6 +9,8 @@ import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.prefs.Preferences;
 
 public class Main {
@@ -145,10 +147,24 @@ public class Main {
                 document.protect(spp);
 
                 String outputPath = path.replace(".pdf", "_protected.pdf");
-                document.save(outputPath);
+                if (Files.exists(Paths.get(outputPath))) {
+                    int result = JOptionPane.showConfirmDialog(
+                            panel,
+                            "The File \"" + outputPath + "\" exists.\nShall this file be overwritten?",
+                            "Overwrite File?",
+                            JOptionPane.YES_NO_OPTION,
+                            JOptionPane.WARNING_MESSAGE );
+
+                    if (result == JOptionPane.YES_OPTION) {
+                        document.save(outputPath);
+                        JOptionPane.showMessageDialog(frame, "PDF p-r-o-t-e-c-t-e-d:\n" + outputPath);
+                    }
+                } else {
+                    document.save(outputPath);
+                    JOptionPane.showMessageDialog(frame, "PDF p-r-o-t-e-c-t-e-d:\n" + outputPath);
+                }
                 document.close();
 
-                JOptionPane.showMessageDialog(frame, "PDF erfolgreich geschützt:\n" + outputPath);
             } catch (Exception ex) {
                 JOptionPane.showMessageDialog(frame, "Fehler: " + ex.getMessage());
             }
