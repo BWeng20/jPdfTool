@@ -32,7 +32,7 @@ application {
 
 
 tasks.register('cleanJreDir', Delete) {
-    delete "$buildDir/jre"
+    delete layout.buildDirectory.dir("jre").get()
 }
 
 
@@ -40,9 +40,8 @@ tasks.register('jlink', Exec) {
     dependsOn cleanJreDir
     dependsOn build
     group = 'distribution'
-    description = 'Erstellt ein jlink Runtime-Image mit ausführbarem Starter'
 
-    def imageDir = "${buildDir}/jre"
+    def imageDir = layout.buildDirectory.dir("jre").get()
     def modulePath = "${System.getProperty('java.home')}/jmods"
 
     commandLine 'jlink',
