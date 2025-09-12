@@ -1,9 +1,10 @@
 package com.bw.jPdfTool;
 
+import com.bw.jtools.svg.SVGConverter;
+import com.bw.jtools.ui.ShapeIcon;
 import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
-import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 
 import javax.imageio.ImageIO;
@@ -15,9 +16,12 @@ import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.prefs.Preferences;
 
@@ -38,7 +42,7 @@ public class UI extends JSplitPane {
     private final JCheckBox allowPrinting = new JCheckBox("Printing");
     private final JCheckBox allowExtraction = new JCheckBox("Extraction");
     private final JTextField filePathField = new JTextField();
-    private final JButton saveButton = new JButton("Write Copy");
+    private final JButton saveButton = new JButton("Write To File");
 
     private final PreviewPane preview = new PreviewPane();
 
@@ -46,6 +50,8 @@ public class UI extends JSplitPane {
     private final JCheckBox allowFillIn = new JCheckBox("Fill Form");
     private final JCheckBox allowAssembly = new JCheckBox("Assembly");
     private final JCheckBox compression = new JCheckBox("Compression");
+
+    private final PageContainer pages = new PageContainer();
 
 
     public UI() {
@@ -136,25 +142,42 @@ public class UI extends JSplitPane {
         gcLabel.gridy++;
         panel.add(allowAssembly, gc);
 
+        gc.gridx = 0;
         gc.gridy++;
         gcLabel.gridy++;
-        gc.weighty = 1;
-        gc.fill = GridBagConstraints.NONE;
+        gc.weighty = 0.5;
+        gc.weightx = 1;
+        gc.gridwidth = 3;
+        gc.fill = GridBagConstraints.BOTH;
+        panel.add(new JScrollPane(pages), gc);
+
+        gc.gridy++;
+        gcLabel.gridy++;
+        gc.weighty = 0;
+        gc.fill = GridBagConstraints.HORIZONTAL;
         gc.anchor = GridBagConstraints.NORTHWEST;
         panel.add(saveButton, gc);
+
 
         gcLabel.anchor = GridBagConstraints.SOUTHWEST;
         gcLabel.gridy++;
         gcLabel.gridwidth = 3;
         gcLabel.fill = GridBagConstraints.BOTH;
+        gcLabel.insets = new Insets(15, 5, 5, 5);
 
         JLabel info = new JLabel();
         info.setVerticalAlignment(SwingConstants.TOP);
-        info.setText("<html>To prevent unauthorized access to a PDF, you only need to set a user password.<br>" +
+        info.setText("<html><font size='+1'>To prevent unauthorized access to a PDF, you only need to set a user password.<br>" +
                 "If you also want to define specific permissions - such as restricting printing or " +
                 "editing - you must set both an owner password and a user password.<br>" +
                 "The owner password always grants full control over the document, while the user password " +
-                "enforces only the permissions you've selected.</html>");
+                "enforces only the permissions you've selected.</font></html>");
+
+        Font f = UIManager.getFont("Panel.font");
+        FontMetrics fm = getFontMetrics(f);
+
+        setPreferredSize(new Dimension(fm.charWidth('W') * 20, fm.getHeight() * 30));
+
         panel.add(info, gcLabel);
 
         generateOwner.addActionListener(e -> ownerPasswordField.setText(UUID.randomUUID().toString()));
@@ -196,58 +219,60 @@ public class UI extends JSplitPane {
             String userPwd = userPasswordField.getText().trim();
 
             if (documentProxy != null) {
-                try {
-                    final Path orgFile = documentProxy.file;
-                    PDDocument document = documentProxy.getDocument();
+                PDDocument document = documentProxy.getLoadedDocument();
+                if (document != null) {
+                    try {
+                        final Path orgFile = documentProxy.getPath();
 
-                    AccessPermission ap = new AccessPermission();
-                    ap.setCanPrint(allowPrinting.isSelected());
-                    ap.setCanModify(allowModification.isSelected());
-                    ap.setCanExtractContent(allowExtraction.isSelected());
-                    ap.setCanFillInForm(allowFillIn.isSelected());
-                    ap.setCanAssembleDocument(allowAssembly.isSelected());
+                        AccessPermission ap = new AccessPermission();
+                        ap.setCanPrint(allowPrinting.isSelected());
+                        ap.setCanModify(allowModification.isSelected());
+                        ap.setCanExtractContent(allowExtraction.isSelected());
+                        ap.setCanFillInForm(allowFillIn.isSelected());
+                        ap.setCanAssembleDocument(allowAssembly.isSelected());
 
-                    StandardProtectionPolicy spp = new StandardProtectionPolicy(ownerPwd, userPwd, ap);
-                    spp.setEncryptionKeyLength(128);
-                    document.protect(spp);
+                        StandardProtectionPolicy spp = new StandardProtectionPolicy(ownerPwd, userPwd, ap);
+                        spp.setEncryptionKeyLength(128);
+                        document.protect(spp);
 
-                    JFileChooser chooser = getChooser();
-                    chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
-                    int result = chooser.showSaveDialog(this);
-                    if (result == JFileChooser.APPROVE_OPTION) {
-                        File selectedFile = chooser.getSelectedFile();
+                        JFileChooser chooser = getChooser();
+                        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+                        int result = chooser.showSaveDialog(this);
+                        if (result == JFileChooser.APPROVE_OPTION) {
+                            File selectedFile = chooser.getSelectedFile();
 
-                        Path selectedFilePath = selectedFile.toPath();
-                        if (Files.exists(selectedFilePath)) {
-                            int overwrite = JOptionPane.showConfirmDialog(
-                                    panel,
-                                    "The File \"" + selectedFile + "\" exists.\nShall this file be overwritten?",
-                                    "Overwrite File?",
-                                    JOptionPane.YES_NO_OPTION,
-                                    JOptionPane.WARNING_MESSAGE);
+                            Path selectedFilePath = selectedFile.toPath();
+                            if (Files.exists(selectedFilePath)) {
+                                int overwrite = JOptionPane.showConfirmDialog(
+                                        panel,
+                                        "The File \"" + selectedFile + "\" exists.\nShall this file be overwritten?",
+                                        "Overwrite File?",
+                                        JOptionPane.YES_NO_OPTION,
+                                        JOptionPane.WARNING_MESSAGE);
 
-                            if (overwrite == JOptionPane.YES_OPTION) {
-                                // PdfBox can't write to the same file. Write into buffer, close original,
-                                // then re-open it.
-                                ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
-                                document.save(os, compression.isSelected()
-                                        ? CompressParameters.DEFAULT_COMPRESSION : CompressParameters.NO_COMPRESSION);
+                                if (overwrite == JOptionPane.YES_OPTION) {
+                                    // PdfBox can't write to the same file. Write into buffer, close original,
+                                    // then re-open it.
+                                    ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
+                                    document.save(os, compression.isSelected()
+                                            ? CompressParameters.DEFAULT_COMPRESSION : CompressParameters.NO_COMPRESSION);
 
-                                documentProxy.close();
-                                documentProxy = null;
+                                    documentProxy.close();
+                                    documentProxy = null;
 
-                                Files.write(selectedFile.toPath(), os.toByteArray());
+                                    Files.write(selectedFile.toPath(), os.toByteArray());
 
-                                JOptionPane.showMessageDialog(this, "PDF stored:\n" + selectedFile, "Stored", JOptionPane.INFORMATION_MESSAGE);
-                                selectPdf(orgFile.toFile());
+                                    JOptionPane.showMessageDialog(this, "PDF stored:\n" + selectedFile, "Stored", JOptionPane.INFORMATION_MESSAGE);
+                                    selectPdf(orgFile.toFile());
+                                }
+                            } else {
+                                document.save(selectedFile);
+                                JOptionPane.showMessageDialog(this, "PDF stored:\n" + selectedFile);
                             }
-                        } else {
-                            document.save(selectedFile);
-                            JOptionPane.showMessageDialog(this, "PDF stored:\n" + selectedFile);
                         }
+                    } catch (Exception ex) {
+                        JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
                     }
-                } catch (Exception ex) {
-                    JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
                 }
             }
         });
@@ -256,10 +281,27 @@ public class UI extends JSplitPane {
         JScrollPane scrollPane = new JScrollPane(preview);
         setRightComponent(scrollPane);
 
-        setDividerLocation(0.5);
+        setDividerLocation(fm.charWidth('W') * 65);
 
         checkPassword();
     }
+
+    private static final Map<String, Icon> icons = new HashMap<>();
+
+    public static Icon getIcon(String name) {
+        synchronized (icons) {
+            Icon i = icons.get(name);
+            if (i == null) {
+                try (InputStream is = UI.class.getResourceAsStream("/" + name + ".svg")) {
+                    i = new ShapeIcon(SVGConverter.convert(is));
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            return i;
+        }
+    }
+
 
     /**
      * Select a pdf file for preview and processing.
@@ -267,38 +309,33 @@ public class UI extends JSplitPane {
     protected void selectPdf(File selectedFile) {
         filePathField.setText(selectedFile.getAbsolutePath());
         prefs.put("lastDir", selectedFile.getParent());
-        if (documentProxy != null)
+        if (documentProxy != null) {
             documentProxy.close();
+        }
+        pages.clear();
+
         documentProxy = new DocumentProxy(selectedFile.toPath());
         documentProxy.owerPassword4Load = ownerPasswordField.getText().trim();
         if (documentProxy.owerPassword4Load.isEmpty())
             documentProxy.owerPassword4Load = null;
 
-        while (true) {
-            try {
-                documentProxy.getDocument();
-                break;
-            } catch (InvalidPasswordException ie) {
-                preview.setErrorText("File is protected.\nPassword needed.");
-                String password = requestOwnerPassword();
-                if (password != null) {
-                    documentProxy.owerPassword4Load = password;
-                } else {
-                    filePathField.setText("");
-                    documentProxy = null;
-                    break;
-                }
-
-            } catch (Exception ex) {
-                ex.printStackTrace();
-                preview.setErrorText(ex.getMessage());
-                documentProxy = null;
-                break;
+        documentProxy.addDocumentConsumer(new DocumentProxy.DocumentConsumer() {
+            @Override
+            public void documentLoaded(PDDocument document) {
+                saveButton.setEnabled(document != null);
             }
-        }
-        if (documentProxy != null)
-            preview.load(documentProxy);
-        saveButton.setEnabled(documentProxy != null);
+
+            @Override
+            public void failed(String error) {
+                saveButton.setEnabled(false);
+                preview.setErrorText(error);
+                filePathField.setText("");
+                documentProxy = null;
+            }
+        });
+        pages.setDocument(documentProxy);
+        preview.setDocument(documentProxy);
+        documentProxy.load();
     }
 
     protected void checkPassword() {
@@ -312,20 +349,6 @@ public class UI extends JSplitPane {
         allowAssembly.setEnabled(rightsPossible);
     }
 
-    protected String requestOwnerPassword() {
-        Object[] message = {"Enter Owner Password:", passwordField};
-        int option = JOptionPane.showConfirmDialog(
-                null, message, "Owner Password needed",
-                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE
-        );
-
-        if (option == JOptionPane.OK_OPTION) {
-            char[] password = passwordField.getPassword();
-            return new String(password);
-        } else {
-            return null;
-        }
-    }
 
     protected JFileChooser getChooser() {
         if (chooser == null) {
@@ -341,7 +364,6 @@ public class UI extends JSplitPane {
 
 
     protected DocumentProxy documentProxy;
-    protected JPasswordField passwordField = new JPasswordField();
 
     protected static final Preferences prefs = Preferences.userRoot().node("jPdfTool");
     protected static JFileChooser chooser;

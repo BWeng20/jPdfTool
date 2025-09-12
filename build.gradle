@@ -11,9 +11,15 @@ repositories {
     mavenCentral()
 }
 
+java {
+    modularity.inferModulePath = true
+}
+
 dependencies {
 
     implementation "com.formdev:flatlaf:3.6.1"
+    implementation "com.formdev:flatlaf-fonts-roboto:2.137"
+    implementation "io.github.bweng20:jSVGIcon:1.6"
 
     implementation 'org.apache.pdfbox:pdfbox:3.0.2'
     implementation 'org.apache.pdfbox:fontbox:3.0.2'

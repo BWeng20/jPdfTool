@@ -1,14 +1,11 @@
 package com.bw.jPdfTool;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
-import org.apache.pdfbox.rendering.PDFRenderer;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
-import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -26,69 +23,6 @@ public class PreviewPane extends JPanel {
         });
     }
 
-    protected class PdfLoaderWorker extends SwingWorker<Void, Page> {
-
-        DocumentProxy documentProxy;
-        boolean stop = false;
-
-
-        public PdfLoaderWorker(DocumentProxy document) {
-            this.documentProxy = document;
-        }
-
-        @Override
-        protected Void doInBackground() {
-            try {
-                PDDocument document = this.documentProxy.getDocument();
-                if (document != null) {
-                    PDFRenderer renderer = new PDFRenderer(document);
-
-                    RenderingHints renderingHints = new RenderingHints(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                    renderer.setRenderingHints(renderingHints);
-
-                    for (int i = 0; i < 2 && i < this.documentProxy.pageCount; i++) {
-                        if (stop || documentProxy.stopProcessing)
-                            break;
-                        BufferedImage image = renderer.renderImageWithDPI(i, 300);
-                        Page page = new Page();
-                        page.nr = i + 1;
-                        page.image = image;
-                        page.scale = 0;
-                        page.pageCount = this.documentProxy.pageCount;
-                        publish(page);
-                    }
-                }
-                synchronized (PreviewPane.this) {
-                    if (PreviewPane.this.worker == PdfLoaderWorker.this)
-                        PreviewPane.this.worker = null;
-                }
-                error = null;
-            } catch (InvalidPasswordException ep) {
-                error = "File is encrypted and owner password\ndoesn't match";
-                SwingUtilities.invokeLater(() -> {
-                    refresh();
-                });
-
-            } catch (Exception e) {
-                error = e.getMessage();
-                SwingUtilities.invokeLater(() -> {
-                    refresh();
-                });
-            }
-            return null;
-
-        }
-
-        @Override
-        protected void process(java.util.List<Page> pages) {
-            synchronized (PreviewPane.this.pages) {
-                PreviewPane.this.pages.addAll(pages);
-                updateScales();
-            }
-            SwingUtilities.invokeLater(PreviewPane.this::refresh);
-        }
-    }
-
     protected void refresh() {
         var sp = PreviewPane.this.getScrollPane();
         sp.revalidate();
@@ -96,30 +30,45 @@ public class PreviewPane extends JPanel {
 
     }
 
-    protected static class Page {
-        BufferedImage image;
-        int nr;
-        int pageCount;
-        double scale;
-    }
-
-    private PdfLoaderWorker worker;
+    private DocumentProxy document;
     private final List<Page> pages = new ArrayList<>();
     private int space = 5;
-    private String error;
 
-    public void load(DocumentProxy file) {
+    private DocumentProxy.PageConsumer pageConsumer = page -> {
+        pages.add(page);
+        updateScales();
+        refresh();
+    };
 
-        error = null;
+    private DocumentProxy.DocumentConsumer docConsumer = new DocumentProxy.DocumentConsumer() {
+        @Override
+        public void documentLoaded(PDDocument document) {
+            removeAll();
+            synchronized (pages) {
+                pages.clear();
+            }
+            refresh();
+        }
+
+        @Override
+        public void failed(String error) {
+
+        }
+    };
+
+    public void setDocument(DocumentProxy file) {
+        if (document != null) {
+            document.removePageConsumer(pageConsumer);
+            document.removeDocumentConsumer(docConsumer);
+        }
+        document = file;
+        removeAll();
         synchronized (pages) {
             pages.clear();
         }
-        synchronized (this) {
-            if (worker != null)
-                worker.stop = true;
-            worker = new PdfLoaderWorker(file);
-            worker.execute();
-        }
+        // To detect if pages needs to be reloaded
+        document.addDocumentConsumer(docConsumer);
+        document.addPageConsumer(pageConsumer);
     }
 
     protected JScrollPane getScrollPane() {
@@ -132,7 +81,6 @@ public class PreviewPane extends JPanel {
     }
 
     protected void updateScales() {
-
         List<Page> tmp;
         synchronized (PreviewPane.this.pages) {
             tmp = new ArrayList<>(PreviewPane.this.pages);
@@ -143,11 +91,10 @@ public class PreviewPane extends JPanel {
         }
     }
 
+    private String error;
+
     public synchronized void setErrorText(String message) {
         error = message;
-        if (worker != null) {
-            worker.stop = true;
-        }
         synchronized (pages) {
             pages.clear();
         }
@@ -210,7 +157,9 @@ public class PreviewPane extends JPanel {
                 int drawHeight = (int) (imgHeight * i.scale);
 
                 int x = (panelWidth - drawWidth) / 2;
-                g2d.drawImage(i.image, x, y, drawWidth, drawHeight, null);
+
+                if (g2d.hitClip(x, y, drawWidth, drawHeight))
+                    g2d.drawImage(i.image, x, y, drawWidth, drawHeight, null);
                 y += drawHeight + space;
             }
         }

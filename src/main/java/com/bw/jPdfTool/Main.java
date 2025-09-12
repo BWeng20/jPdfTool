@@ -1,5 +1,8 @@
 package com.bw.jPdfTool;
 
+import com.bw.jtools.svg.SVGConverter;
+import com.bw.jtools.ui.ShapeMultiResolutionImage;
+import com.formdev.flatlaf.fonts.roboto.FlatRobotoFont;
 import com.formdev.flatlaf.util.SystemInfo;
 
 import javax.swing.*;
@@ -14,6 +17,7 @@ public class Main {
 
     protected void createUI() {
 
+        FlatRobotoFont.installLazy();
         com.formdev.flatlaf.FlatDarkLaf.setup();
 
         if (SystemInfo.isLinux) {
@@ -22,7 +26,14 @@ public class Main {
         }
 
         JFrame frame = new JFrame("PDF Passwords & Rights");
-        frame.setIconImage(UI.readFromResources("/icon.png"));
+
+        try {
+            ShapeMultiResolutionImage icon = new ShapeMultiResolutionImage(
+                    SVGConverter.convert(Main.class.getResourceAsStream("/icon.svg"))
+            );
+            frame.setIconImage(icon);
+        } catch (Exception e) {
+        }
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
         UI ui = new UI();
