@@ -2,12 +2,12 @@ package com.bw.jPdfTool;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.rendering.PDFRenderer;
 
 import javax.swing.*;
 import java.awt.*;
-import java.awt.image.BufferedImage;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -110,10 +110,9 @@ public class DocumentProxy {
             pageConsumerList.add(consumer);
         }
         synchronized (this) {
-            if (documentRendered) {
-                for (Page p : pages)
+            for (Page p : pages)
+                if (p.image != null)
                     consumer.pageRendered(p);
-            }
         }
     }
 
@@ -203,6 +202,7 @@ public class DocumentProxy {
         }
     }
 
+
     /**
      * Interface to notify about rendered pages.
      */
@@ -269,6 +269,13 @@ public class DocumentProxy {
                         }
                     }
                     if (document != null) {
+                        synchronized (pages) {
+                            pages.clear();
+                            for (int i = 0; i < pageCount; ++i) {
+                                Page page = new Page(DocumentProxy.this, i + 1, pageCount);
+                                pages.add(page);
+                            }
+                        }
                         fireDocumentLoaded();
                         PdfRenderWorker render = new PdfRenderWorker();
                         render.execute();
@@ -280,6 +287,25 @@ public class DocumentProxy {
             }
         }
     }
+
+    public void rotatePage(int pageNb, int degree) {
+        ensuredNotClosed();
+        if (document == null)
+            throw new IllegalStateException("No document loaded");
+        int pageIndex = pageNb - 1;
+
+        if (renderWorker != null) {
+            renderWorker.cancel(true);
+            renderWorker = null;
+        }
+        Page p = pages.get(pageIndex);
+        p.image = null;
+        p.scale = 0;
+        PDPage pd = document.getPage(pageIndex);
+        pd.setRotation(pd.getRotation() + degree);
+        refirePages();
+    }
+
 
     public void deletePage(int pageNb) {
         ensuredNotClosed();
@@ -302,6 +328,10 @@ public class DocumentProxy {
             p.pageNb = i + 1;
             p.pageCount = pageCount;
         }
+        refirePages();
+    }
+
+    private void refirePages() {
         fireDocumentLoaded();
         boolean imageMissing = false;
         for (Page p : pages) {
@@ -311,9 +341,11 @@ public class DocumentProxy {
                 firePageRendered(p);
         }
         if (imageMissing) {
+            documentRendered = false;
             renderWorker = new PdfRenderWorker();
             renderWorker.execute();
         }
+
     }
 
     protected class PdfRenderWorker extends SwingWorker<Void, Page> {
@@ -334,11 +366,14 @@ public class DocumentProxy {
                 for (int i = 0; i < pageCount; i++) {
                     if (closed)
                         break;
-                    BufferedImage image = renderer.renderImageWithDPI(i, 300);
-
-                    Page page = new Page(DocumentProxy.this, i + 1, pageCount);
-                    page.image = image;
-                    publish(page);
+                    Page page;
+                    synchronized (pages) {
+                        page = pages.get(i);
+                    }
+                    if (page.image == null) {
+                        page.image = renderer.renderImageWithDPI(i, 300);
+                        publish(page);
+                    }
                 }
                 error = null;
             } catch (InvalidPasswordException ep) {
@@ -352,11 +387,8 @@ public class DocumentProxy {
 
         @Override
         protected void process(java.util.List<Page> pages) {
-            synchronized (DocumentProxy.this.pages) {
-                DocumentProxy.this.pages.addAll(pages);
-                for (Page p : pages)
-                    firePageRendered(p);
-            }
+            for (Page p : pages)
+                firePageRendered(p);
         }
     }
 

@@ -28,9 +28,7 @@ public class PageContainer extends JComponent {
             orgPageCount = -1;
             int newPageCount = document.getNumberOfPages();
             ensurePage(newPageCount);
-            // special case: if all pages are removed we need a manual refresh
-            if ( newPageCount <= 0)
-                repaint();
+            repaint();
         }
 
         @Override

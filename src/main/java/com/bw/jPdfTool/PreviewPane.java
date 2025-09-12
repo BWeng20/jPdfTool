@@ -35,7 +35,10 @@ public class PreviewPane extends JPanel {
     private int space = 5;
 
     private final DocumentProxy.PageConsumer pageConsumer = page -> {
-        pages.add(page);
+        if (page.pageNb > pages.size())
+            pages.add(page);
+        else
+            pages.add(page.pageNb - 1, page);
         updateScales();
         refresh();
     };

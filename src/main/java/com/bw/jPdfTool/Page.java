@@ -17,4 +17,7 @@ public class Page {
         this.pageCount = pageCount;
     }
 
+    public void rotatePage(int degree) {
+        document.rotatePage(pageNb, degree);
+    }
 }

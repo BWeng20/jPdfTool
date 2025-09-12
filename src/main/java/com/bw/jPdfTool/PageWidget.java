@@ -3,13 +3,33 @@ package com.bw.jPdfTool;
 import javax.swing.*;
 import javax.swing.border.EtchedBorder;
 import java.awt.*;
+import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 
 public class PageWidget extends JComponent {
 
-    JButton deleteButton = new JButton();
+    JButton deleteButton;
+    JButton rotateClockwiseButton;
+
+
+    private int buttonY = 5;
+
+    JButton createButton(String icon, ActionListener actionListener) {
+        JButton b = new JButton();
+        Icon ic = UI.getIcon(icon);
+
+        b.addActionListener(actionListener);
+        b.setLocation(5, buttonY);
+        b.setIcon(ic);
+        b.setSize(ic.getIconWidth() + 8, ic.getIconHeight() + 8);
+        b.setVisible(false);
+
+        buttonY += b.getHeight() + 5;
+
+        return b;
+    }
 
     /**
      * Page Number used only until page is rendered.
@@ -20,24 +40,27 @@ public class PageWidget extends JComponent {
 
     public PageWidget(int pageNr) {
         this.pageNr = pageNr;
-        Icon ic = UI.getIcon("delete");
         setBorder(BorderFactory.createEtchedBorder(EtchedBorder.LOWERED));
-        deleteButton.setLocation(5, 5);
-        deleteButton.setIcon(ic);
-        deleteButton.setSize(ic.getIconWidth() + 8, ic.getIconHeight() + 8);
-        deleteButton.setVisible(false);
-        add(deleteButton);
-        updateUI();
 
-        deleteButton.addActionListener(e -> {
+        deleteButton = createButton("delete", e -> {
             if (page != null) {
                 page.document.deletePage(page.pageNb);
             }
         });
+        add(deleteButton);
+
+        rotateClockwiseButton = createButton("rotateClockwise", e -> {
+            if (page != null) {
+                page.rotatePage(90);
+            }
+        });
+        add(rotateClockwiseButton);
+        updateUI();
+
 
         Timer hideTimer = new Timer(200, e -> {
             hovering = false;
-            deleteButton.setVisible(false);
+            setButtonsVisible(false);
         });
         hideTimer.setRepeats(false);
 
@@ -45,7 +68,7 @@ public class PageWidget extends JComponent {
             @Override
             public void mouseEntered(MouseEvent e) {
                 hideTimer.stop();
-                deleteButton.setVisible(page != null);
+                setButtonsVisible(page != null);
                 hovering = true;
             }
 
@@ -57,7 +80,13 @@ public class PageWidget extends JComponent {
 
         addMouseListener(mouseListener);
         deleteButton.addMouseListener(mouseListener);
+        rotateClockwiseButton.addMouseListener(mouseListener);
 
+    }
+
+    private void setButtonsVisible(boolean v) {
+        deleteButton.setVisible(v);
+        rotateClockwiseButton.setVisible(v);
     }
 
     public void setPage(Page page) {
@@ -66,7 +95,7 @@ public class PageWidget extends JComponent {
                 pageNr = page.pageNb;
             this.page = page;
             if (hovering)
-                deleteButton.setVisible(true);
+                setButtonsVisible(true);
             repaint();
         }
     }
