@@ -26,7 +26,11 @@ public class PageContainer extends JComponent {
         public void documentLoaded(PDDocument document) {
             removeAll();
             orgPageCount = -1;
-            ensurePage(document.getNumberOfPages());
+            int newPageCount = document.getNumberOfPages();
+            ensurePage(newPageCount);
+            // special case: if all pages are removed we need a manual refresh
+            if ( newPageCount <= 0)
+                repaint();
         }
 
         @Override
