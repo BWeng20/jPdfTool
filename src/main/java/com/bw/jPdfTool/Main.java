@@ -32,7 +32,7 @@ public class Main {
                     SVGConverter.convert(Main.class.getResourceAsStream("/icon.svg"))
             );
             frame.setIconImage(icon);
-        } catch (Exception e) {
+        } catch (Exception ignored) {
         }
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 

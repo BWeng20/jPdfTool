@@ -53,4 +53,4 @@ Saves the modified PDF with the updated settings applied.
 3. Enable modification of additional document properties
 
 
-![Screenshot](doc/Screenshot%20Release1.0.png)
+![Screenshot](doc/Screenshot%20Release1.1.png)

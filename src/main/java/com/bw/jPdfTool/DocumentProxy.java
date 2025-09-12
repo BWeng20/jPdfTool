@@ -20,7 +20,7 @@ import java.util.concurrent.Future;
 public class DocumentProxy {
 
     public final List<Page> pages = new ArrayList<>();
-    private Path file;
+    private final Path file;
     public int pageCount = -1;
     public boolean closed = false;
     public String owerPassword4Load;
@@ -30,7 +30,7 @@ public class DocumentProxy {
     private PdfLoadWorker loadWorker;
     private PdfRenderWorker renderWorker;
     private String error;
-    private List<PageConsumer> pageConsumerList = new ArrayList<>();
+    private final List<PageConsumer> pageConsumerList = new ArrayList<>();
     private final List<DocumentConsumer> docConsumerList = new ArrayList<>();
 
     public DocumentProxy(Path file) {
@@ -230,7 +230,7 @@ public class DocumentProxy {
         boolean passwordNeeded = false;
 
         @Override
-        protected PDDocument doInBackground() throws Exception {
+        protected PDDocument doInBackground() {
             try {
                 PDDocument document = owerPassword4Load != null
                         ? Loader.loadPDF(file.toFile(), owerPassword4Load)

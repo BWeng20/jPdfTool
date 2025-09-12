@@ -7,17 +7,14 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 
-import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
-import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
-import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -26,15 +23,6 @@ import java.util.UUID;
 import java.util.prefs.Preferences;
 
 public class UI extends JSplitPane {
-
-    public static BufferedImage readFromResources(String name) {
-        try {
-            URL imageUrl = UI.class.getResource(name);
-            return ImageIO.read(imageUrl);
-        } catch (Exception e) {
-            return null;
-        }
-    }
 
     private final JTextField ownerPasswordField = new JTextField();
     private final JTextField userPasswordField = new JTextField();
@@ -294,6 +282,7 @@ public class UI extends JSplitPane {
             if (i == null) {
                 try (InputStream is = UI.class.getResourceAsStream("/" + name + ".svg")) {
                     i = new ShapeIcon(SVGConverter.convert(is));
+                    icons.put(name, i);
                 } catch (Exception e) {
                     e.printStackTrace();
                 }

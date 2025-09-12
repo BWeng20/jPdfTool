@@ -14,14 +14,14 @@ public class PageContainer extends JComponent {
 
     private DocumentProxy document;
 
-    private DocumentProxy.PageConsumer pageConsumer = page -> {
+    private final DocumentProxy.PageConsumer pageConsumer = page -> {
         PageWidget pw = getPage(page.pageNb);
         if (pw != null) {
             pw.setPage(page);
         }
     };
 
-    private DocumentProxy.DocumentConsumer docConsumer = new DocumentProxy.DocumentConsumer() {
+    private final DocumentProxy.DocumentConsumer docConsumer = new DocumentProxy.DocumentConsumer() {
         @Override
         public void documentLoaded(PDDocument document) {
             removeAll();

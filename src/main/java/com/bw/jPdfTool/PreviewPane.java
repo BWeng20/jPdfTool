@@ -34,13 +34,13 @@ public class PreviewPane extends JPanel {
     private final List<Page> pages = new ArrayList<>();
     private int space = 5;
 
-    private DocumentProxy.PageConsumer pageConsumer = page -> {
+    private final DocumentProxy.PageConsumer pageConsumer = page -> {
         pages.add(page);
         updateScales();
         refresh();
     };
 
-    private DocumentProxy.DocumentConsumer docConsumer = new DocumentProxy.DocumentConsumer() {
+    private final DocumentProxy.DocumentConsumer docConsumer = new DocumentProxy.DocumentConsumer() {
         @Override
         public void documentLoaded(PDDocument document) {
             removeAll();

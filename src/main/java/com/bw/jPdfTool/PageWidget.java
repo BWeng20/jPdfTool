@@ -95,7 +95,7 @@ public class PageWidget extends JComponent {
 
         if (page == null) {
             FontMetrics fm = g2d.getFontMetrics();
-            String txt = "# " + Integer.toString(pageNr);
+            String txt = "# " + pageNr;
             var bounds = fm.getStringBounds(txt, g2d);
             g2d.setPaint(getForeground());
             g2d.drawString(txt, (int) (0.5 + (w - bounds.getWidth()) / 2), (h - fm.getAscent()) / 2);
