@@ -1,4 +1,4 @@
-package com.bw.jPdfTool;
+package com.bw.jPdfTool.model;
 
 import java.awt.image.BufferedImage;
 

@@ -1,5 +1,7 @@
 package com.bw.jPdfTool;
 
+import com.bw.jPdfTool.model.DocumentProxy;
+import com.bw.jPdfTool.model.Page;
 import org.apache.pdfbox.pdmodel.PDDocument;
 
 import javax.swing.*;
@@ -13,7 +15,7 @@ import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
 
-public class PageContainer extends JComponent {
+public class PageWidgetContainer extends JComponent {
 
     private final java.util.List<PageWidget> widgets = new ArrayList<>();
     private final List<ListSelectionListener> selectionListenerList = new ArrayList<>();
@@ -58,7 +60,7 @@ public class PageContainer extends JComponent {
         }
     };
 
-    public PageContainer() {
+    public PageWidgetContainer() {
         addComponentListener(new ComponentAdapter() {
             @Override
             public void componentResized(ComponentEvent e) {

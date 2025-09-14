@@ -1,4 +1,4 @@
-package com.bw.jPdfTool;
+package com.bw.jPdfTool.model;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;

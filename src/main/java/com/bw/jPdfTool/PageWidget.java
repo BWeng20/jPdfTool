@@ -1,5 +1,7 @@
 package com.bw.jPdfTool;
 
+import com.bw.jPdfTool.model.Page;
+
 import javax.swing.*;
 import javax.swing.border.Border;
 import java.awt.*;

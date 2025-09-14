@@ -1,5 +1,7 @@
 package com.bw.jPdfTool;
 
+import com.bw.jPdfTool.model.DocumentProxy;
+import com.bw.jPdfTool.model.Page;
 import com.bw.jtools.svg.SVGConverter;
 import com.bw.jtools.ui.ShapeIcon;
 import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
@@ -44,7 +46,7 @@ public class UI extends JSplitPane {
     private final JButton moveRight;
     private final JTextField rotation = new JTextField();
     private final JLabel pageNb = new JLabel();
-    private final PageContainer pages = new PageContainer();
+    private final PageWidgetContainer pages = new PageWidgetContainer();
     protected DocumentProxy documentProxy;
 
     public UI() {
