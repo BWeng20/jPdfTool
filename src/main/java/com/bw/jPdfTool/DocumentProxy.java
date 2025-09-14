@@ -3,6 +3,7 @@ package com.bw.jPdfTool;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageTree;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.rendering.PDFRenderer;
 
@@ -21,17 +22,16 @@ public class DocumentProxy {
 
     public final List<Page> pages = new ArrayList<>();
     private final Path file;
+    private final List<PageConsumer> pageConsumerList = new ArrayList<>();
+    private final List<DocumentConsumer> docConsumerList = new ArrayList<>();
     public int pageCount = -1;
     public boolean closed = false;
     public String owerPassword4Load;
     protected JPasswordField passwordField = new JPasswordField();
     private PDDocument document;
-    private boolean documentRendered = false;
     private PdfLoadWorker loadWorker;
     private PdfRenderWorker renderWorker;
     private String error;
-    private final List<PageConsumer> pageConsumerList = new ArrayList<>();
-    private final List<DocumentConsumer> docConsumerList = new ArrayList<>();
 
     public DocumentProxy(Path file) {
         this.file = file;
@@ -202,6 +202,116 @@ public class DocumentProxy {
         }
     }
 
+    /**
+     * Moves a page by offset. The ensure no cache issues, the complete document is re-rendered.
+     *
+     * @param pageNb The 1-based page number.
+     * @param offset The offset
+     */
+    public void movePage(int pageNb, int offset) {
+        ensuredDocument();
+        if (pageNb < 0 || pageNb > pageCount) {
+            throw new IllegalArgumentException("Page " + pageNb + " is out of range");
+        }
+
+        PDPageTree tree = document.getDocumentCatalog().getPages();
+        int pageIndex = pageNb - 1;
+        PDPage pdPage = tree.get(pageIndex);
+        PDPage prevPage = tree.get(pageIndex + offset);
+        tree.remove(pageIndex);
+        tree.insertAfter(pdPage, prevPage);
+
+        synchronized (pages) {
+            pages.clear();
+            for (int i = 0; i < pageCount; ++i) {
+                Page page = new Page(DocumentProxy.this, i + 1, pageCount);
+                pages.add(page);
+            }
+        }
+        refirePages();
+    }
+
+    /**
+     * Get the rotation of a page.
+     *
+     * @param pageNb The 1-based page number.
+     * @return The rotation in degree 0,90,180 or 270.
+     */
+    public int getPageRotation(int pageNb) {
+        ensuredDocument();
+
+        int pageIndex = pageNb - 1;
+        PDPage pd = document.getPage(pageIndex);
+        return pd.getRotation();
+    }
+
+    public void rotatePage(int pageNb, int degree) {
+        ensuredDocument();
+
+        int pageIndex = pageNb - 1;
+
+        if (renderWorker != null) {
+            renderWorker.cancel(true);
+            renderWorker = null;
+        }
+        Page p = pages.get(pageIndex);
+        p.image = null;
+        p.scale = 0;
+        PDPage pd = document.getPage(pageIndex);
+        pd.setRotation(pd.getRotation() + degree);
+        refirePages();
+    }
+
+    public void deletePage(int pageNb) {
+        ensuredDocument();
+
+        int pageIndex = pageNb - 1;
+
+        if (renderWorker != null) {
+            renderWorker.cancel(true);
+            renderWorker = null;
+        }
+
+        // 0-based index!
+        document.removePage(pageIndex);
+        pageCount = document.getNumberOfPages();
+
+        pages.remove(pageIndex);
+        for (int i = 0; i < pageCount; ++i) {
+            Page p = pages.get(i);
+            p.pageNb = i + 1;
+            p.pageCount = pageCount;
+        }
+        refirePages();
+    }
+
+    private void refirePages() {
+        fireDocumentLoaded();
+        boolean imageMissing = false;
+        for (Page p : pages) {
+            if (p.image == null)
+                imageMissing = true;
+            else
+                firePageRendered(p);
+        }
+        if (imageMissing) {
+            renderWorker = new PdfRenderWorker();
+            renderWorker.execute();
+        }
+
+    }
+
+    protected void ensuredNotClosed() {
+        if (closed)
+            throw new IllegalStateException("Document is closed");
+    }
+
+    protected void ensuredDocument() {
+        ensuredNotClosed();
+        if (document == null)
+            throw new IllegalStateException("No Document loaded");
+    }
+
 
     /**
      * Interface to notify about rendered pages.
@@ -288,71 +398,10 @@ public class DocumentProxy {
         }
     }
 
-    public void rotatePage(int pageNb, int degree) {
-        ensuredNotClosed();
-        if (document == null)
-            throw new IllegalStateException("No document loaded");
-        int pageIndex = pageNb - 1;
-
-        if (renderWorker != null) {
-            renderWorker.cancel(true);
-            renderWorker = null;
-        }
-        Page p = pages.get(pageIndex);
-        p.image = null;
-        p.scale = 0;
-        PDPage pd = document.getPage(pageIndex);
-        pd.setRotation(pd.getRotation() + degree);
-        refirePages();
-    }
-
-
-    public void deletePage(int pageNb) {
-        ensuredNotClosed();
-        if (document == null)
-            throw new IllegalStateException("No document loaded");
-        int pageIndex = pageNb - 1;
-
-        if (renderWorker != null) {
-            renderWorker.cancel(true);
-            renderWorker = null;
-        }
-
-        // 0-based index!
-        document.removePage(pageIndex);
-        pageCount = document.getNumberOfPages();
-
-        pages.remove(pageIndex);
-        for (int i = 0; i < pageCount; ++i) {
-            Page p = pages.get(i);
-            p.pageNb = i + 1;
-            p.pageCount = pageCount;
-        }
-        refirePages();
-    }
-
-    private void refirePages() {
-        fireDocumentLoaded();
-        boolean imageMissing = false;
-        for (Page p : pages) {
-            if (p.image == null)
-                imageMissing = true;
-            else
-                firePageRendered(p);
-        }
-        if (imageMissing) {
-            documentRendered = false;
-            renderWorker = new PdfRenderWorker();
-            renderWorker.execute();
-        }
-
-    }
-
     protected class PdfRenderWorker extends SwingWorker<Void, Page> {
 
         @Override
         protected void done() {
-            documentRendered = true;
         }
 
         @Override
@@ -382,7 +431,6 @@ public class DocumentProxy {
                 error = e.getMessage();
             }
             return null;
-
         }
 
         @Override
@@ -391,10 +439,4 @@ public class DocumentProxy {
                 firePageRendered(p);
         }
     }
-
-    protected void ensuredNotClosed() {
-        if (closed)
-            throw new IllegalStateException("Document is closed");
-    }
-
 }

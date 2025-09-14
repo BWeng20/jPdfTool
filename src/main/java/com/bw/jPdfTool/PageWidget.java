@@ -1,92 +1,32 @@
 package com.bw.jPdfTool;
 
 import javax.swing.*;
-import javax.swing.border.EtchedBorder;
+import javax.swing.border.Border;
 import java.awt.*;
-import java.awt.event.ActionListener;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.awt.event.MouseListener;
 
 public class PageWidget extends JComponent {
 
-    JButton deleteButton;
-    JButton rotateClockwiseButton;
-
-
-    private int buttonY = 5;
-
-    JButton createButton(String icon, ActionListener actionListener) {
-        JButton b = new JButton();
-        Icon ic = UI.getIcon(icon);
-
-        b.addActionListener(actionListener);
-        b.setLocation(5, buttonY);
-        b.setIcon(ic);
-        b.setSize(ic.getIconWidth() + 8, ic.getIconHeight() + 8);
-        b.setVisible(false);
-
-        buttonY += b.getHeight() + 5;
-
-        return b;
-    }
-
+    private final Border selectedBorder;
+    private final Border notSelectedBorder;
     /**
      * Page Number used only until page is rendered.
      */
     private int pageNr;
     private Page page;
-    private boolean hovering = false;
+    private boolean selected = false;
 
     public PageWidget(int pageNr) {
         this.pageNr = pageNr;
-        setBorder(BorderFactory.createEtchedBorder(EtchedBorder.LOWERED));
-
-        deleteButton = createButton("delete", e -> {
-            if (page != null) {
-                page.document.deletePage(page.pageNb);
-            }
-        });
-        add(deleteButton);
-
-        rotateClockwiseButton = createButton("rotateClockwise", e -> {
-            if (page != null) {
-                page.rotatePage(90);
-            }
-        });
-        add(rotateClockwiseButton);
+        Color c = UIManager.getColor("Button.foreground");
+        selectedBorder = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(c, 2), BorderFactory.createEmptyBorder(2, 2, 2, 2));
+        notSelectedBorder = BorderFactory.createEmptyBorder(4, 4, 4, 4);
+        setBorder(notSelectedBorder);
         updateUI();
-
-
-        Timer hideTimer = new Timer(200, e -> {
-            hovering = false;
-            setButtonsVisible(false);
-        });
-        hideTimer.setRepeats(false);
-
-        MouseListener mouseListener = new MouseAdapter() {
-            @Override
-            public void mouseEntered(MouseEvent e) {
-                hideTimer.stop();
-                setButtonsVisible(page != null);
-                hovering = true;
-            }
-
-            @Override
-            public void mouseExited(MouseEvent e) {
-                hideTimer.restart();
-            }
-        };
-
-        addMouseListener(mouseListener);
-        deleteButton.addMouseListener(mouseListener);
-        rotateClockwiseButton.addMouseListener(mouseListener);
-
     }
 
-    private void setButtonsVisible(boolean v) {
-        deleteButton.setVisible(v);
-        rotateClockwiseButton.setVisible(v);
+    public Page getPage() {
+        return page;
     }
 
     public void setPage(Page page) {
@@ -94,10 +34,23 @@ public class PageWidget extends JComponent {
             if (page != null)
                 pageNr = page.pageNb;
             this.page = page;
-            if (hovering)
-                setButtonsVisible(true);
-            repaint();
         }
+    }
+
+    public int getPageNumber() {
+        return pageNr;
+    }
+
+    public boolean isSelected() {
+        return selected;
+    }
+
+    public void setSelected(boolean selected) {
+        if (this.selected != selected) {
+            this.selected = selected;
+            setBorder(selected ? selectedBorder : notSelectedBorder);
+        }
+
     }
 
     @Override
@@ -106,8 +59,7 @@ public class PageWidget extends JComponent {
         setFont(f);
         FontMetrics fm = getFontMetrics(f);
         Dimension d = new Dimension(fm.charWidth('W') * 10, fm.getHeight() * 6);
-        setPreferredSize(d);
-        setSize(d);
+        setMinimumSize(d);
     }
 
     @Override
@@ -133,10 +85,8 @@ public class PageWidget extends JComponent {
             int imgWidth = page.image.getWidth();
             int imgHeight = page.image.getHeight();
 
-            double scale = Math.min(w / (double) imgWidth, h / (double) imgHeight);
-
-            int drawWidth = (int) (imgWidth * scale);
-            int drawHeight = (int) (imgHeight * scale);
+            int drawWidth = (int) (imgWidth * page.scale);
+            int drawHeight = (int) (imgHeight * page.scale);
 
             int x = i.left + (w - drawWidth) / 2;
             int y = i.top + (h - drawHeight) / 2;
@@ -146,5 +96,13 @@ public class PageWidget extends JComponent {
         }
     }
 
+    @Override
+    public String toString() {
+        StringBuilder stringBuilder = new StringBuilder();
+        stringBuilder.append("Page ").append(pageNr).append(" selected:").append(this.selected);
+        if (page != null && page.image != null)
+            stringBuilder.append(" image ").append(page.image.getWidth()).append(" x ").append(page.image.getHeight());
+        return stringBuilder.toString();
+    }
 
 }

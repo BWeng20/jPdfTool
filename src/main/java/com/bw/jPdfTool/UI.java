@@ -24,23 +24,28 @@ import java.util.prefs.Preferences;
 
 public class UI extends JSplitPane {
 
+    protected static final Preferences prefs = Preferences.userRoot().node("jPdfTool");
+    private static final Map<String, Icon> icons = new HashMap<>();
+    protected static JFileChooser chooser;
+    protected static FileNameExtensionFilter pdfFilter = new FileNameExtensionFilter("PDF-Files (*.pdf)", "pdf");
     private final JTextField ownerPasswordField = new JTextField();
     private final JTextField userPasswordField = new JTextField();
-
     private final JCheckBox allowPrinting = new JCheckBox("Printing");
     private final JCheckBox allowExtraction = new JCheckBox("Extraction");
     private final JTextField filePathField = new JTextField();
     private final JButton saveButton = new JButton("Write To File");
-
-    private final PreviewPane preview = new PreviewPane();
-
     private final JCheckBox allowModification = new JCheckBox("Modify");
     private final JCheckBox allowFillIn = new JCheckBox("Fill Form");
     private final JCheckBox allowAssembly = new JCheckBox("Assembly");
     private final JCheckBox compression = new JCheckBox("Compression");
-
+    private final JButton deleteButton;
+    private final JButton rotateClockwiseButton;
+    private final JButton moveLeft;
+    private final JButton moveRight;
+    private final JTextField rotation = new JTextField();
+    private final JLabel pageNb = new JLabel();
     private final PageContainer pages = new PageContainer();
-
+    protected DocumentProxy documentProxy;
 
     public UI() {
         super(JSplitPane.HORIZONTAL_SPLIT);
@@ -53,6 +58,7 @@ public class UI extends JSplitPane {
         compression.setSelected(true);
         allowPrinting.setSelected(true);
         saveButton.setEnabled(false);
+        rotation.setEditable(false);
 
         JButton browseButton = new JButton("...");
 
@@ -130,31 +136,100 @@ public class UI extends JSplitPane {
         gcLabel.gridy++;
         panel.add(allowAssembly, gc);
 
-        gc.gridx = 0;
-        gc.gridy++;
-        gcLabel.gridy++;
-        gc.weighty = 0.5;
-        gc.weightx = 1;
-        gc.gridwidth = 3;
-        gc.fill = GridBagConstraints.BOTH;
-        panel.add(new JScrollPane(pages), gc);
+        pages.addSelectionListener(e -> setSelectedPage(e.getFirstIndex() < 0 ? null : pages.getSelectedPage()));
 
-        gc.gridy++;
+        deleteButton = new JButton(getIcon("delete"));
+        deleteButton.addActionListener(e -> {
+            PageWidget pw = pages.getSelectedPage();
+            if (pw != null) {
+                Page page = pw.getPage();
+                page.document.deletePage(page.pageNb);
+            }
+        });
+
+        rotateClockwiseButton = new JButton(getIcon("rotateClockwise"));
+        rotateClockwiseButton.addActionListener(e -> {
+            PageWidget pw = pages.getSelectedPage();
+            if (pw != null) {
+                Page page = pw.getPage();
+                page.rotatePage(90);
+            }
+        });
+
+        moveLeft = new JButton(getIcon("moveLeft"));
+        moveLeft.addActionListener(e -> {
+                    PageWidget pw = pages.getSelectedPage();
+                    if (pw != null) {
+                        pw.getPage().movePage(-1);
+                    }
+                }
+        );
+
+        moveRight = new JButton(getIcon("moveRight"));
+        moveRight.addActionListener(e -> {
+            PageWidget pw = pages.getSelectedPage();
+            if (pw != null) {
+                pw.getPage().movePage(1);
+            }
+        });
+
+        JPanel pageManipulation = new JPanel(new GridBagLayout());
+        GridBagConstraints pmGc = new GridBagConstraints();
+        pmGc.anchor = GridBagConstraints.NORTHWEST;
+        pmGc.insets = new Insets(0, 5, 5, 5);
+        pmGc.gridx = 0;
+        pmGc.gridy = 0;
+        pmGc.gridwidth = 2;
+        pmGc.weightx = 0;
+        pageManipulation.add(pageNb, pmGc);
+        pmGc.gridwidth = 1;
+        pmGc.gridy++;
+        JLabel rotationLabel = new JLabel("Rotation");
+        rotationLabel.setLabelFor(rotation);
+        pageManipulation.add(rotationLabel, pmGc);
+        pmGc.gridx = 1;
+        pageManipulation.add(rotation, pmGc);
+
+        pmGc.gridx = 2;
+        pmGc.gridy = 0;
+        pmGc.fill = GridBagConstraints.NONE;
+        pageManipulation.add(deleteButton, pmGc);
+        pmGc.gridy++;
+        pageManipulation.add(rotateClockwiseButton, pmGc);
+        pmGc.gridy++;
+        pageManipulation.add(moveLeft, pmGc);
+        pmGc.gridx++;
+        pageManipulation.add(moveRight, pmGc);
+        pmGc.gridx++;
+        pmGc.weightx = 1;
+        pageManipulation.add(Box.createHorizontalGlue(), pmGc);
+
+        pageManipulation.setBorder(BorderFactory.createTitledBorder("Page Manipulation"));
+
         gcLabel.gridy++;
-        gc.weighty = 0;
         gc.fill = GridBagConstraints.HORIZONTAL;
         gc.anchor = GridBagConstraints.NORTHWEST;
-        panel.add(saveButton, gc);
+        gc.weightx = 1;
+        gc.weighty = 0;
+        gc.gridwidth = 3;
+        gc.gridx = 0;
+        gc.gridy++;
+        panel.add(pageManipulation, gc);
 
+
+        gcLabel.gridy++;
+        gc.gridy++;
+        panel.add(saveButton, gc);
 
         gcLabel.anchor = GridBagConstraints.SOUTHWEST;
         gcLabel.gridy++;
+        gcLabel.weighty = 0.5;
         gcLabel.gridwidth = 3;
         gcLabel.fill = GridBagConstraints.BOTH;
         gcLabel.insets = new Insets(15, 5, 5, 5);
 
         JLabel info = new JLabel();
-        info.setVerticalAlignment(SwingConstants.TOP);
+        info.setVerticalAlignment(SwingConstants.BOTTOM);
         info.setText("<html><font size='+1'>To prevent unauthorized access to a PDF, you only need to set a user password.<br>" +
                 "If you also want to define specific permissions - such as restricting printing or " +
                 "editing - you must set both an owner password and a user password.<br>" +
@@ -266,15 +341,13 @@ public class UI extends JSplitPane {
         });
 
         setLeftComponent(panel);
-        JScrollPane scrollPane = new JScrollPane(preview);
+        JScrollPane scrollPane = new JScrollPane(pages);
         setRightComponent(scrollPane);
 
         setDividerLocation(fm.charWidth('W') * 65);
-
         checkPassword();
+        setSelectedPage(null);
     }
-
-    private static final Map<String, Icon> icons = new HashMap<>();
 
     public static Icon getIcon(String name) {
         synchronized (icons) {
@@ -291,6 +364,20 @@ public class UI extends JSplitPane {
         }
     }
 
+    private void setSelectedPage(PageWidget page) {
+        boolean enabled = page != null;
+        deleteButton.setEnabled(enabled);
+        rotateClockwiseButton.setEnabled(enabled);
+        moveLeft.setEnabled(enabled);
+        moveRight.setEnabled(enabled);
+        if (enabled) {
+            pageNb.setText("Page " + page.getPageNumber());
+            rotation.setText(page.getPage().getRotation() + " °");
+        } else {
+            rotation.setText("");
+            pageNb.setText("<html><i>Select a Page</i></hml>");
+        }
+    }
 
     /**
      * Select a pdf file for preview and processing.
@@ -317,13 +404,11 @@ public class UI extends JSplitPane {
             @Override
             public void failed(String error) {
                 saveButton.setEnabled(false);
-                preview.setErrorText(error);
                 filePathField.setText("");
                 documentProxy = null;
             }
         });
         pages.setDocument(documentProxy);
-        preview.setDocument(documentProxy);
         documentProxy.load();
     }
 
@@ -338,7 +423,6 @@ public class UI extends JSplitPane {
         allowAssembly.setEnabled(rightsPossible);
     }
 
-
     protected JFileChooser getChooser() {
         if (chooser == null) {
             chooser = new JFileChooser();
@@ -350,12 +434,5 @@ public class UI extends JSplitPane {
         }
         return chooser;
     }
-
-
-    protected DocumentProxy documentProxy;
-
-    protected static final Preferences prefs = Preferences.userRoot().node("jPdfTool");
-    protected static JFileChooser chooser;
-    protected static FileNameExtensionFilter pdfFilter = new FileNameExtensionFilter("PDF-Files (*.pdf)", "pdf");
 
 }

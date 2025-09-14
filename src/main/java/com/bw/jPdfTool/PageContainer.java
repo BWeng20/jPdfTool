@@ -3,59 +3,167 @@ package com.bw.jPdfTool;
 import org.apache.pdfbox.pdmodel.PDDocument;
 
 import javax.swing.*;
-import javax.swing.border.EtchedBorder;
+import javax.swing.event.ListSelectionEvent;
+import javax.swing.event.ListSelectionListener;
 import java.awt.*;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.util.ArrayList;
+import java.util.List;
 
 public class PageContainer extends JComponent {
 
-    public PageContainer() {
-        setBorder(BorderFactory.createEtchedBorder(EtchedBorder.LOWERED));
-    }
-
+    private final java.util.List<PageWidget> widgets = new ArrayList<>();
+    private final List<ListSelectionListener> selectionListenerList = new ArrayList<>();
     private DocumentProxy document;
-
+    private int orgPageCount = -1;
+    private Dimension orgVS;
+    private Dimension orgSize;
+    private int space = 5;
+    private boolean refreshing = false;
+    private PageWidget selectedPage;
     private final DocumentProxy.PageConsumer pageConsumer = page -> {
-        PageWidget pw = getPage(page.pageNb);
+        PageWidget pw = getPageWidget(page.pageNb);
         if (pw != null) {
             pw.setPage(page);
+            orgSize = null;
+            refresh();
+            if (pw == selectedPage)
+                fireSelectionEvent(page.pageNb - 1);
         }
     };
-
     private final DocumentProxy.DocumentConsumer docConsumer = new DocumentProxy.DocumentConsumer() {
         @Override
         public void documentLoaded(PDDocument document) {
+            int idx = getSelectedPageIndex();
             removeAll();
+            widgets.clear();
+            selectedPage = null;
             orgPageCount = -1;
             int newPageCount = document.getNumberOfPages();
             ensurePage(newPageCount);
+            if (idx >= 0)
+                if (widgets.isEmpty())
+                    setSelectedPage(null, true);
+                else
+                    setSelectedPage(widgets.get(Math.min(idx, widgets.size() - 1)));
             repaint();
         }
 
         @Override
         public void failed(String error) {
+            setErrorText(error);
         }
     };
 
-    public PageWidget getPage(int pageNb) {
-        ensurePage(pageNb);
-        return (PageWidget) getComponent(pageNb - 1);
+    public PageContainer() {
+        addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                refresh();
+            }
+        });
     }
 
-    private void ensurePage(int pageNb) {
-        int cc = getComponentCount();
-        while (cc < pageNb) {
-            addPage(new PageWidget(++cc));
+    public int getSelectedPageIndex() {
+        return widgets.indexOf(getSelectedPage());
+    }
+
+    public PageWidget getSelectedPage() {
+        return selectedPage;
+    }
+
+    public void setSelectedPage(PageWidget selectedPage) {
+        setSelectedPage(selectedPage, false);
+    }
+
+    protected void setSelectedPage(PageWidget selectedPage, boolean forced) {
+        if (this.selectedPage != selectedPage || forced) {
+
+            PageWidget old = this.selectedPage;
+
+            if (this.selectedPage != null && this.selectedPage != selectedPage)
+                this.selectedPage.setSelected(false);
+
+            this.selectedPage = selectedPage;
+
+            int idx = widgets.indexOf(selectedPage);
+            if (selectedPage != null) {
+                if (idx < 0)
+                    throw new IllegalArgumentException("Selected page is not in list");
+                selectedPage.setSelected(true);
+            }
+
+            if (selectedPage != null) {
+                if (selectedPage.getPage() != null) {
+                    fireSelectionEvent(idx);
+                } else if (old != null) {
+                    // Delay event until page is loaded
+                    fireSelectionEvent(-1);
+                }
+            } else {
+                fireSelectionEvent(-1);
+            }
         }
     }
 
+    private void fireSelectionEvent(int idx) {
+        ListSelectionEvent e = new ListSelectionEvent(this, idx, idx, false);
+        List<ListSelectionListener> tmp = new ArrayList<>(selectionListenerList);
+        for (ListSelectionListener l : tmp) {
+            l.valueChanged(e);
+        }
+    }
+
+    public void addSelectionListener(ListSelectionListener l) {
+        selectionListenerList.remove(l);
+        selectionListenerList.add(l);
+    }
+
+    public void removeSelectionListener(ListSelectionListener l) {
+        selectionListenerList.remove(l);
+    }
+
+    public PageWidget getPageWidget(int pageNb) {
+        ensurePage(pageNb);
+        return widgets.get(pageNb - 1);
+    }
+
+
+    private void ensurePage(int pageNb) {
+        int cc = widgets.size();
+        if (cc < pageNb) {
+            while (cc < pageNb) {
+                PageWidget widget = new PageWidget(++cc);
+                widget.addMouseListener(new MouseAdapter() {
+
+                    final PageWidget w = widget;
+
+                    @Override
+                    public void mousePressed(MouseEvent e) {
+                        setSelectedPage(w);
+                    }
+                });
+                widgets.add(widget);
+                add(widget);
+            }
+            refresh();
+        }
+    }
+
+
     public void clear() {
         removeAll();
+        widgets.clear();
         if (document != null) {
             document.removePageConsumer(pageConsumer);
             document.removeDocumentConsumer(docConsumer);
             document = null;
         }
         orgPageCount = -1;
+        setSelectedPage(null);
         revalidate();
 
     }
@@ -67,51 +175,59 @@ public class PageContainer extends JComponent {
         document.addPageConsumer(pageConsumer);
     }
 
-    int orgPageCount = -1;
-    Dimension orgVS;
-    Dimension orgSize;
-
     @Override
     public Dimension getPreferredSize() {
 
-        int cc = getComponentCount();
         Dimension vs = getScrollPane().getViewport().getSize();
+        int wc = widgets.size();
         if (orgSize == null ||
-                cc != orgPageCount ||
+                wc != orgPageCount ||
                 !vs.equals(orgVS)) {
 
-            orgPageCount = cc;
+            int drawWidth = vs.width - 8 -(2 * space);
+            orgPageCount = wc;
             orgVS = vs;
             int x = 5;
             int y = 5;
             int w = 5;
             int h = 5;
-            for (int i = 0; i < cc; ++i) {
+            for (int i = 0; i < wc; ++i) {
 
-                Component c = getComponent(i);
-
-                if ((x + c.getWidth()) >= vs.width && x > 10) {
-                    y = h;
-                    x = 5;
+                PageWidget c = widgets.get(i);
+                Page page = c.getPage();
+                Insets insets = c.getBorder().getBorderInsets(this);
+                int drawHeight;
+                if (page != null && page.image != null) {
+                    page.scale = ((double) drawWidth) / page.image.getWidth();
+                    drawHeight = (int) (0.5 + (page.scale * page.image.getHeight()));
+                } else {
+                    drawHeight = (int) (0.5 + drawWidth * (297f / 210f));
                 }
+                drawHeight += insets.top + insets.bottom;
+
                 c.setLocation(x, y);
-                x += c.getWidth() + 5;
-                if (x > w)
-                    w = x;
+                c.setSize(drawWidth+8, drawHeight+4);
 
-                int ym = y + c.getHeight() + 5;
-                if (ym > h)
-                    h = ym;
-
+                h = y + c.getHeight();
+                y = h + space;
             }
             orgSize = new Dimension(w, h);
         }
         return orgSize;
     }
 
-    public void addPage(PageWidget page) {
-        add(page);
-        revalidate();
+    /**
+     * Triggers a refresh of scales and layout.
+     */
+    private void refresh() {
+        if (!refreshing) {
+            refreshing = true;
+            SwingUtilities.invokeLater(() -> {
+                refreshing = false;
+                revalidate();
+                repaint();
+            });
+        }
     }
 
     protected JScrollPane getScrollPane() {
@@ -119,4 +235,7 @@ public class PageContainer extends JComponent {
     }
 
 
+    public void setErrorText(String error) {
+        // TODO
+    }
 }

@@ -20,4 +20,13 @@ public class Page {
     public void rotatePage(int degree) {
         document.rotatePage(pageNb, degree);
     }
+
+    public int getRotation() {
+        return document.getPageRotation(pageNb);
+    }
+
+
+    public void movePage(int i) {
+        document.movePage(pageNb, i);
+    }
 }
