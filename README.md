@@ -34,8 +34,8 @@ Toggle compression to optimize file size.
 Permissions only take effect when both owner and user passwords are set.<br>
 The UI automatically disables permission checkboxes unless both passwords are provided.
 
-### 🧹 Remove Pages
-Remove pages.
+### 🧹 Remove and Rearrange Pages
+Remove pages and changes the order of pages.
 
 ### 🔓 Load Protected PDFs
 
@@ -48,9 +48,9 @@ This password input is masked and will not be shown in the UI afterward.
 Saves the modified PDF with the updated settings applied.
 
 ## 🛠️ TODOs
-1. Implement page rearrangement functionality
-2. Add support for merging multiple PDF files (verify PDFBox capabilities for that)
-3. Enable modification of additional document properties
+
+1. Add support for merging multiple PDF files (verify PDFBox capabilities for that)
+2Enable modification of additional document properties
 
 
 ![Screenshot](doc/Screenshot%20Release1.1.png)
