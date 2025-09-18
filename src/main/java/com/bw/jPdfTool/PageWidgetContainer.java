@@ -15,6 +15,9 @@ import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Hosts Page-Widgets for all pages of the document.
+ */
 public class PageWidgetContainer extends JComponent {
 
     private final java.util.List<PageWidget> widgets = new ArrayList<>();
@@ -186,7 +189,7 @@ public class PageWidgetContainer extends JComponent {
                 wc != orgPageCount ||
                 !vs.equals(orgVS)) {
 
-            int drawWidth = vs.width - 8 -(2 * space);
+            int drawWidth = vs.width - 8 - (2 * space);
             orgPageCount = wc;
             orgVS = vs;
             int x = 5;
@@ -201,6 +204,8 @@ public class PageWidgetContainer extends JComponent {
                 int drawHeight;
                 if (page != null && page.image != null) {
                     page.scale = ((double) drawWidth) / page.image.getWidth();
+                    c.setScale(page.scale);
+                    c.setImage(page.image);
                     drawHeight = (int) (0.5 + (page.scale * page.image.getHeight()));
                 } else {
                     drawHeight = (int) (0.5 + drawWidth * (297f / 210f));
@@ -208,7 +213,7 @@ public class PageWidgetContainer extends JComponent {
                 drawHeight += insets.top + insets.bottom;
 
                 c.setLocation(x, y);
-                c.setSize(drawWidth+8, drawHeight+4);
+                c.setSize(drawWidth + 8, drawHeight + 4);
 
                 h = y + c.getHeight();
                 y = h + space;

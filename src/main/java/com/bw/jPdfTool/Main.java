@@ -18,7 +18,8 @@ public class Main {
     protected void createUI() {
 
         FlatRobotoFont.installLazy();
-        com.formdev.flatlaf.FlatDarkLaf.setup();
+        // com.formdev.flatlaf.FlatDarkLaf.setup();
+        com.formdev.flatlaf.FlatLightLaf.setup();
 
         if (SystemInfo.isLinux) {
             JFrame.setDefaultLookAndFeelDecorated(true);

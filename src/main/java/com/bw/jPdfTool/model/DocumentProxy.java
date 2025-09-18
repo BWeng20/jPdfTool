@@ -312,6 +312,10 @@ public class DocumentProxy {
             throw new IllegalStateException("No Document loaded");
     }
 
+    public PDPage getPDPage(int pageNb) {
+        ensuredDocument();
+        return document.getPage(pageNb - 1);
+    }
 
     /**
      * Interface to notify about rendered pages.

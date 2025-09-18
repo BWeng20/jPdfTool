@@ -44,6 +44,7 @@ public class UI extends JSplitPane {
     private final JButton rotateClockwiseButton;
     private final JButton moveLeft;
     private final JButton moveRight;
+    private final JButton images;
     private final JTextField rotation = new JTextField();
     private final JLabel pageNb = new JLabel();
     private final PageWidgetContainer pages = new PageWidgetContainer();
@@ -175,6 +176,14 @@ public class UI extends JSplitPane {
             }
         });
 
+        images = new JButton("Images");
+        images.addActionListener(e -> {
+            PageWidget pw = pages.getSelectedPage();
+            if (pw != null) {
+                showImageExtractor(pw.getPage());
+            }
+        });
+
         JPanel pageManipulation = new JPanel(new GridBagLayout());
         GridBagConstraints pmGc = new GridBagConstraints();
         pmGc.anchor = GridBagConstraints.NORTHWEST;
@@ -202,7 +211,12 @@ public class UI extends JSplitPane {
         pageManipulation.add(moveLeft, pmGc);
         pmGc.gridx++;
         pageManipulation.add(moveRight, pmGc);
+
         pmGc.gridx++;
+        pmGc.gridy = 0;
+        pageManipulation.add(images, pmGc);
+
+        pmGc.gridy++;
         pmGc.weightx = 1;
         pageManipulation.add(Box.createHorizontalGlue(), pmGc);
 
@@ -372,6 +386,7 @@ public class UI extends JSplitPane {
         rotateClockwiseButton.setEnabled(enabled);
         moveLeft.setEnabled(enabled);
         moveRight.setEnabled(enabled);
+        images.setEnabled(enabled);
         if (enabled) {
             pageNb.setText("Page " + page.getPageNumber());
             rotation.setText(page.getPage().getRotation() + " °");
@@ -435,6 +450,32 @@ public class UI extends JSplitPane {
             chooser.setCurrentDirectory(new File(lastDir));
         }
         return chooser;
+    }
+
+    PageImageViewer pageImageViewer;
+    JDialog imageExtractorDialog;
+
+    protected void showImageExtractor(Page page) {
+        if (pageImageViewer == null) {
+            pageImageViewer = new PageImageViewer();
+            imageExtractorDialog = new JDialog(SwingUtilities.getWindowAncestor(this));
+
+            JPanel main = new JPanel(new BorderLayout(0, 5));
+            JPanel buttons = new JPanel(new FlowLayout());
+            buttons.add(new JButton("close"));
+
+            main.add(BorderLayout.CENTER, pageImageViewer);
+            main.add(BorderLayout.SOUTH, buttons);
+
+            imageExtractorDialog.setContentPane(pageImageViewer);
+            imageExtractorDialog.setModalityType(Dialog.ModalityType.APPLICATION_MODAL);
+            imageExtractorDialog.setDefaultCloseOperation(JDialog.HIDE_ON_CLOSE);
+            imageExtractorDialog.setLocationRelativeTo(this);
+
+            imageExtractorDialog.pack();
+        }
+        pageImageViewer.setPage(page);
+        imageExtractorDialog.setVisible(true);
     }
 
 }
