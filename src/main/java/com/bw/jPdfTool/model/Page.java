@@ -3,7 +3,6 @@ package com.bw.jPdfTool.model;
 import com.bw.jPdfTool.ImageExtractor;
 
 import java.awt.image.BufferedImage;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -41,22 +40,21 @@ public class Page {
 
         public double x;
         public double y;
+
+        public double scaleX;
+        public double scaleY;
+
+        public String toString() {
+            if (image == null)
+                return name + " " + x + "," + y + " scale " + scaleX + " x " + scaleY;
+            else
+                return name + " " + x + "," + y + " scale " + scaleX + " x " + scaleY + " size " + image.getWidth() + " x " + image.getHeight();
+        }
     }
 
     public List<ImageResource> getImages() {
         List<ImageResource> images = new ArrayList<>();
-
-        ImageExtractor ie = new ImageExtractor(document.getPDPage(pageNb));
-        try {
-            ie.run();
-            images.addAll(ie.images);
-
-            ImageResource r = new ImageResource();
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
+        images.addAll(ImageExtractor.getImages(document.getLoadedDocument(), pageNb - 1));
         return images;
     }
 }

@@ -1,174 +1,131 @@
 package com.bw.jPdfTool;
 
 import com.bw.jPdfTool.model.Page;
-import org.apache.pdfbox.contentstream.PDFGraphicsStreamEngine;
-import org.apache.pdfbox.cos.COSName;
-import org.apache.pdfbox.cos.COSStream;
-import org.apache.pdfbox.pdmodel.PDPage;
-import org.apache.pdfbox.pdmodel.PDResources;
-import org.apache.pdfbox.pdmodel.font.PDFont;
-import org.apache.pdfbox.pdmodel.graphics.form.PDTransparencyGroup;
+import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImage;
-import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.PDInlineImage;
-import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
 import org.apache.pdfbox.pdmodel.graphics.state.PDSoftMask;
+import org.apache.pdfbox.rendering.PDFRenderer;
+import org.apache.pdfbox.rendering.PageDrawer;
+import org.apache.pdfbox.rendering.PageDrawerParameters;
 import org.apache.pdfbox.util.Matrix;
-import org.apache.pdfbox.util.Vector;
 
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 
 /**
- * Stream Engine to extract images.
+ * A PageDrawer to save images.<br>
+ * As we need the positions and scales of the images in the pages, a simple scan
+ * will not help, we need to "draw".<br>
+ * We could also overload other drawing function to spare CPU... Perhaps later.
  */
-public class ImageExtractor extends PDFGraphicsStreamEngine {
+public class ImageExtractor extends PageDrawer {
 
     public final List<Page.ImageResource> images = new ArrayList<>();
-    public boolean noColorConvert = false;
-
-    private final Set<COSStream> processed = new HashSet<>();
     private int imageCounter = 1;
 
-    public ImageExtractor(PDPage page) {
-        super(page);
+    private static class MyPDFRenderer extends PDFRenderer {
+        MyPDFRenderer(PDDocument document) {
+            super(document);
+        }
+
+        ImageExtractor extractor;
+
+        @Override
+        protected PageDrawer createPageDrawer(PageDrawerParameters parameters) throws IOException {
+            extractor = new ImageExtractor(parameters);
+            return extractor;
+        }
     }
 
-    protected void addImage(String name, BufferedImage image) {
-        Page.ImageResource i = new Page.ImageResource();
-        i.image = image;
-        i.name = name;
+    /**
+     * Extract images from the page - no stencils and no inline-images.
+     *
+     * @param document  The document.
+     * @param pageIndex The 0-based index of the page.
+     * @return The list of images, possibly empty but never null.
+     */
+    public static List<Page.ImageResource> getImages(PDDocument document, int pageIndex) {
 
+        try {
+            MyPDFRenderer renderer = new MyPDFRenderer(document);
+            BufferedImage image = renderer.renderImage(pageIndex);
 
-        var mat = getGraphicsState().getCurrentTransformationMatrix();
-        Point2D p = new Point2D.Double(0, 0);
-
-        AffineTransform imageTransform = new AffineTransform(mat.createAffineTransform());
-        int rotationAngle = getPage().getRotation();
-        if (rotationAngle != 0) {
-            imageTransform.preConcatenate(AffineTransform.getRotateInstance(Math.toRadians(rotationAngle)));
+            for (var i : renderer.extractor.images)
+                System.out.println("> " + i);
+            return renderer.extractor.images;
+        } catch (IOException e) {
+            e.printStackTrace();
         }
-
-        imageTransform.transform(p, p);
-        i.x = p.getX();
-        i.y = p.getY();
-
-        images.add(i);
+        return Collections.emptyList();
     }
 
-    public void run() throws IOException {
-        PDPage page = getPage();
-        processPage(page);
-        PDResources res = page.getResources();
-        if (res == null) {
-            return;
-        }
-        // Code below is copied from examples, I don't know what this does...
-        // Need to check "processSoftMask"
-        for (COSName name : res.getExtGStateNames()) {
-            PDExtendedGraphicsState extGState = res.getExtGState(name);
-            if (extGState == null) {
-                continue;
-            }
-            PDSoftMask softMask = extGState.getSoftMask();
-            if (softMask != null) {
-                PDTransparencyGroup group = softMask.getGroup();
-                if (group != null) {
-                    res.getExtGState(name).copyIntoGraphicsState(getGraphicsState());
-                    processSoftMask(group);
-                }
-            }
-        }
+
+    private ImageExtractor(PageDrawerParameters parameters) throws IOException {
+        super(parameters);
     }
 
     @Override
     public void drawImage(PDImage pdImage) throws IOException {
-        if (pdImage instanceof PDImageXObject) {
-            PDImageXObject xobject = (PDImageXObject) pdImage;
-            COSStream cos = xobject.getCOSObject();
-            if (processed.contains(cos)) {
-                return;
-            }
-            processed.add(cos);
-        } else if (pdImage instanceof PDInlineImage) {
-            // Skipping inline image
+        var graphics = getGraphics();
+
+        if (pdImage.isStencil() || pdImage instanceof PDInlineImage)
             return;
+
+        Matrix ctm = getGraphicsState().getCurrentTransformationMatrix();
+        AffineTransform at = ctm.createAffineTransform();
+
+        graphics.setComposite(getGraphicsState().getNonStrokingJavaComposite());
+        setClip();
+        drawBufferedImage(pdImage.getImage(), at);
+    }
+
+    private void drawBufferedImage(BufferedImage image, AffineTransform at) throws IOException {
+        var graphics = getGraphics();
+
+        // PDFBox maintains part of the final state in the  graphics transformation.
+        // To calculate the effective coordinates we need to do the same as PageDrawer.
+
+        AffineTransform originalTransform = graphics.getTransform();
+        AffineTransform imageTransform = new AffineTransform(at);
+        int width = image.getWidth();
+        int height = image.getHeight();
+
+        imageTransform.scale(1.0 / width, -1.0 / height);
+        imageTransform.translate(0, -height);
+
+        PDSoftMask softMask = getGraphicsState().getSoftMask();
+        if (softMask != null) {
+            // TODO: Do we need this?
+        } else {
+            Matrix imageTransformMatrix = new Matrix(imageTransform);
+            Matrix graphicsTransformMatrix = new Matrix(originalTransform);
+            float scaleX = Math.abs(imageTransformMatrix.getScalingFactorX() * graphicsTransformMatrix.getScalingFactorX());
+            float scaleY = Math.abs(imageTransformMatrix.getScalingFactorY() * graphicsTransformMatrix.getScalingFactorY());
+
+            Page.ImageResource i = new Page.ImageResource();
+            i.name = "image-" + (imageCounter++);
+            i.image = image;
+            i.scaleX = scaleX;
+            i.scaleY = scaleY;
+            images.add(i);
+
+            int w = Math.round(image.getWidth() * scaleX);
+            int h = Math.round(image.getHeight() * scaleY);
+            imageTransform.scale(1f / w * image.getWidth(), 1f / h * image.getHeight());
+            imageTransform.preConcatenate(originalTransform);
+
+            // Do not actually "draw", but get the effective coordinates.
+            Point2D p = new Point2D.Double(0, 0);
+            imageTransform.transform(p, p);
+            i.x = p.getX();
+            i.y = p.getY();
         }
-
-        // TODO: Any unique naming available?
-        String name = "image-" + (imageCounter++);
-
-        BufferedImage image = null;
-        if (noColorConvert) {
-            image = pdImage.getRawImage();
-        }
-        if (image == null)
-            image = pdImage.getImage();
-        if (image != null) {
-            addImage(name, image);
-        }
-    }
-
-    @Override
-    public void appendRectangle(Point2D p0, Point2D p1, Point2D p2, Point2D p3) {
-    }
-
-    @Override
-    public void clip(int windingRule) {
-    }
-
-    @Override
-    public void moveTo(float x, float y) {
-    }
-
-    @Override
-    public void lineTo(float x, float y) {
-    }
-
-    @Override
-    public void curveTo(float x1, float y1, float x2, float y2, float x3, float y3) {
-    }
-
-    @Override
-    public Point2D getCurrentPoint() {
-        return new Point2D.Float(0, 0);
-    }
-
-    @Override
-    public void closePath() {
-    }
-
-    @Override
-    public void endPath() {
-    }
-
-    @Override
-    protected void showGlyph(Matrix textRenderingMatrix,
-                             PDFont font,
-                             int code,
-                             Vector displacement) {
-    }
-
-    @Override
-    public void strokePath() throws IOException {
-    }
-
-    @Override
-    public void fillPath(int windingRule) throws IOException {
-    }
-
-    @Override
-    public void fillAndStrokePath(int windingRule) throws IOException {
-    }
-
-    @Override
-    public void shadingFill(COSName shadingName) throws IOException {
     }
 
 }

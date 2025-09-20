@@ -24,12 +24,30 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.prefs.Preferences;
 
+/**
+ * Main panel to show the pdf tool. Wrap this panel into a frame to create an app.
+ * See {@link Main#main(String[])}.
+ */
 public class UI extends JSplitPane {
+
+    /**
+     * User preferences key for the last PDF directory the user selected.
+     */
+    public final static String USER_PREF_LAST_PDF_DIR = "lastDir";
+
+    /**
+     * User preferences key for the last image directory the user selected.
+     */
+    public final static String USER_PREF_LAST_IMAGE_DIR = "lastImageDir";
+
 
     protected static final Preferences prefs = Preferences.userRoot().node("jPdfTool");
     private static final Map<String, Icon> icons = new HashMap<>();
-    protected static JFileChooser chooser;
+    protected static JFileChooser pdfChooser;
+    protected static JFileChooser imageChooser;
     protected static FileNameExtensionFilter pdfFilter = new FileNameExtensionFilter("PDF-Files (*.pdf)", "pdf");
+    protected static FileNameExtensionFilter imageFilter = new FileNameExtensionFilter("Picture (*.jpg, *.png)", "jpeg", "jpg", "png");
+
     private final JTextField ownerPasswordField = new JTextField();
     private final JTextField userPasswordField = new JTextField();
     private final JCheckBox allowPrinting = new JCheckBox("Printing");
@@ -142,6 +160,7 @@ public class UI extends JSplitPane {
         pages.addSelectionListener(e -> setSelectedPage(e.getFirstIndex() < 0 ? null : pages.getSelectedPage()));
 
         deleteButton = new JButton(getIcon("delete"));
+        deleteButton.setToolTipText("Deletes the current page.");
         deleteButton.addActionListener(e -> {
             PageWidget pw = pages.getSelectedPage();
             if (pw != null) {
@@ -151,6 +170,7 @@ public class UI extends JSplitPane {
         });
 
         rotateClockwiseButton = new JButton(getIcon("rotateClockwise"));
+        rotateClockwiseButton.setToolTipText("Rotates the current page clockwise.");
         rotateClockwiseButton.addActionListener(e -> {
             PageWidget pw = pages.getSelectedPage();
             if (pw != null) {
@@ -160,6 +180,7 @@ public class UI extends JSplitPane {
         });
 
         moveLeft = new JButton(getIcon("moveLeft"));
+        moveLeft.setToolTipText("Moves the current page up.");
         moveLeft.addActionListener(e -> {
                     PageWidget pw = pages.getSelectedPage();
                     if (pw != null) {
@@ -169,6 +190,7 @@ public class UI extends JSplitPane {
         );
 
         moveRight = new JButton(getIcon("moveRight"));
+        moveRight.setToolTipText("Moves the current page down.");
         moveRight.addActionListener(e -> {
             PageWidget pw = pages.getSelectedPage();
             if (pw != null) {
@@ -177,6 +199,7 @@ public class UI extends JSplitPane {
         });
 
         images = new JButton("Images");
+        images.setToolTipText("Shows embedded images of the current page.");
         images.addActionListener(e -> {
             PageWidget pw = pages.getSelectedPage();
             if (pw != null) {
@@ -282,7 +305,7 @@ public class UI extends JSplitPane {
         userPasswordField.getDocument().addDocumentListener(passwordChecker);
 
         browseButton.addActionListener(e -> {
-            JFileChooser chooser = getChooser();
+            JFileChooser chooser = getPdfChooser();
             chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
             int result = chooser.showOpenDialog(this);
             if (result == JFileChooser.APPROVE_OPTION) {
@@ -314,7 +337,7 @@ public class UI extends JSplitPane {
                         spp.setEncryptionKeyLength(128);
                         document.protect(spp);
 
-                        JFileChooser chooser = getChooser();
+                        JFileChooser chooser = getPdfChooser();
                         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
                         int result = chooser.showSaveDialog(this);
                         if (result == JFileChooser.APPROVE_OPTION) {
@@ -322,14 +345,7 @@ public class UI extends JSplitPane {
 
                             Path selectedFilePath = selectedFile.toPath();
                             if (Files.exists(selectedFilePath)) {
-                                int overwrite = JOptionPane.showConfirmDialog(
-                                        panel,
-                                        "The File \"" + selectedFile + "\" exists.\nShall this file be overwritten?",
-                                        "Overwrite File?",
-                                        JOptionPane.YES_NO_OPTION,
-                                        JOptionPane.WARNING_MESSAGE);
-
-                                if (overwrite == JOptionPane.YES_OPTION) {
+                                if (askOverwrite(this, selectedFilePath)) {
                                     // PdfBox can't write to the same file. Write into buffer, close original,
                                     // then re-open it.
                                     ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
@@ -364,6 +380,18 @@ public class UI extends JSplitPane {
         checkPassword();
         setSelectedPage(null);
     }
+
+    public static boolean askOverwrite(Component comp, Path file) {
+        int overwrite = JOptionPane.showConfirmDialog(
+                comp,
+                "The File \"" + file + "\" exists.\nShall this file be overwritten?",
+                "Overwrite File?",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+
+        return (overwrite == JOptionPane.YES_OPTION);
+    }
+
 
     public static Icon getIcon(String name) {
         synchronized (icons) {
@@ -401,7 +429,7 @@ public class UI extends JSplitPane {
      */
     protected void selectPdf(File selectedFile) {
         filePathField.setText(selectedFile.getAbsolutePath());
-        prefs.put("lastDir", selectedFile.getParent());
+        prefs.put(USER_PREF_LAST_PDF_DIR, selectedFile.getParent());
         if (documentProxy != null) {
             documentProxy.close();
         }
@@ -440,16 +468,29 @@ public class UI extends JSplitPane {
         allowAssembly.setEnabled(rightsPossible);
     }
 
-    protected JFileChooser getChooser() {
-        if (chooser == null) {
-            chooser = new JFileChooser();
-            chooser.setFileFilter(pdfFilter);
+    public static JFileChooser getImageChooser() {
+        if (imageChooser == null) {
+            imageChooser = new JFileChooser();
         }
-        String lastDir = prefs.get("lastDir", null);
+        imageChooser.setFileFilter(imageFilter);
+        String lastDir = prefs.get(USER_PREF_LAST_IMAGE_DIR, null);
         if (lastDir != null) {
-            chooser.setCurrentDirectory(new File(lastDir));
+            imageChooser.setCurrentDirectory(new File(lastDir));
         }
-        return chooser;
+        imageChooser.setMultiSelectionEnabled(false);
+        return imageChooser;
+    }
+
+    public static JFileChooser getPdfChooser() {
+        if (pdfChooser == null) {
+            pdfChooser = new JFileChooser();
+            pdfChooser.setFileFilter(pdfFilter);
+        }
+        String lastDir = prefs.get(USER_PREF_LAST_PDF_DIR, null);
+        if (lastDir != null) {
+            pdfChooser.setCurrentDirectory(new File(lastDir));
+        }
+        return pdfChooser;
     }
 
     PageImageViewer pageImageViewer;

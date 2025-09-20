@@ -14,6 +14,7 @@ public class ImageWidget extends JComponent {
     private final Border selectedBorder;
     private final Border notSelectedBorder;
     private BufferedImage image;
+    private String imageName;
     private boolean selected = false;
 
     public void setAlternativeText(String alternativeText) {
@@ -46,9 +47,19 @@ public class ImageWidget extends JComponent {
         return image;
     }
 
+    public String getImageName() {
+        return imageName;
+    }
+
+    public void setImageName(String image) {
+        setToolTipText(image == null ? "" : image);
+        imageName = image;
+    }
+
     public void setImage(BufferedImage image) {
         if (image != this.image) {
             this.image = image;
+            this.imageName = null;
             repaint();
         }
     }
