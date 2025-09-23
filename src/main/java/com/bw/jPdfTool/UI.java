@@ -473,12 +473,14 @@ public class UI extends JSplitPane {
 
                                 Files.write(selectedFile.toPath(), os.toByteArray());
 
-                                JOptionPane.showMessageDialog(this, "PDF stored:\n" + selectedFile, "Stored", JOptionPane.INFORMATION_MESSAGE);
+                                JOptionPane.showMessageDialog(this,
+                                        "<html><font size='+1'>Stored PDF as<br><b>" + selectedFile+"</b></font></html>", "Stored", JOptionPane.INFORMATION_MESSAGE );
                                 selectPdf(orgFile.toFile());
                             }
                         } else {
                             document.save(selectedFile);
-                            JOptionPane.showMessageDialog(this, "PDF stored:\n" + selectedFile);
+                            JOptionPane.showMessageDialog(this,
+                                    "<html><font size='+1'>Stored PDF as<br><b>" + selectedFile+"</b></font></html>", "Stored", JOptionPane.INFORMATION_MESSAGE );
                         }
                         if (prefs.getBoolean(USER_PREF_STORE_OWNER_PASSWORD, false)) {
                             prefs.put(USER_PREF_OWNER_PASSWORD, ownerPwd);
