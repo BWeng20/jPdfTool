@@ -15,6 +15,11 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.dnd.DnDConstants;
+import java.awt.dnd.DropTarget;
+import java.awt.dnd.DropTargetAdapter;
+import java.awt.dnd.DropTargetDropEvent;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
@@ -91,6 +96,23 @@ public class UI extends JSplitPane {
 
     public UI() {
         super(JSplitPane.HORIZONTAL_SPLIT);
+
+        new DropTarget(this, new DropTargetAdapter() {
+            @Override
+            public void drop(DropTargetDropEvent dtde) {
+                try {
+                    dtde.acceptDrop(DnDConstants.ACTION_COPY);
+                    java.util.List<File> droppedFiles = (java.util.List<File>) dtde.getTransferable()
+                            .getTransferData(DataFlavor.javaFileListFlavor);
+                    if (!droppedFiles.isEmpty()) {
+                        selectPdf( droppedFiles.get(0));
+                    }
+                } catch (Exception ex) {
+                    ex.printStackTrace(System.err);
+                }
+            }
+        });
+
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
@@ -541,7 +563,9 @@ public class UI extends JSplitPane {
      */
     protected void selectPdf(File selectedFile) {
         filePathField.setText(selectedFile.getAbsolutePath());
-        prefs.put(USER_PREF_LAST_PDF_DIR, selectedFile.getParent());
+        String parent = selectedFile.getParent();
+        if ( parent != null)
+            prefs.put(USER_PREF_LAST_PDF_DIR, parent);
         if (documentProxy != null) {
             documentProxy.close();
         }
