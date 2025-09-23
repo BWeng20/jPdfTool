@@ -47,10 +47,17 @@ This password input is masked and will not be shown in the UI afterward.
 ### 💾 Store the File
 Saves the modified PDF with the updated settings applied.
 
+
+### Switch between Light and Dark "Light Look-And-Feels"
+
+Menu to switch between FlatLaf-Dark and -Light Look-And-Feels.<br>
+The setting is stored in user-preferences.
+
+
 ## 🛠️ TODOs
 
 1. Add support for merging multiple PDF files (verify PDFBox capabilities for that)
-2Enable modification of additional document properties
+2. Enable modification of additional document properties
 
 
-![Screenshot](doc/Screenshot%20Release1.1.png)
+![Screenshot](doc/Screenshot%20Release1.2.png)
