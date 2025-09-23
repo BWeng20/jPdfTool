@@ -4,6 +4,7 @@ import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.model.Page;
 import com.bw.jtools.svg.SVGConverter;
 import com.bw.jtools.ui.ShapeIcon;
+import com.formdev.flatlaf.FlatLaf;
 import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
@@ -21,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.prefs.Preferences;
 
@@ -40,6 +42,25 @@ public class UI extends JSplitPane {
      */
     public final static String USER_PREF_LAST_IMAGE_DIR = "lastImageDir";
 
+    /**
+     * User preferences key for the last Look And Feel selected.
+     */
+    public final static String USER_PREF_LAF = "laf";
+
+    /**
+     * User preferences key for the owner password option.
+     */
+    public final static String USER_PREF_STORE_OWNER_PASSWORD = "storeOwnerPassword";
+
+    /**
+     * User preferences key for the owner password (if option is enabled)).
+     */
+    public final static String USER_PREF_OWNER_PASSWORD = "ownerPassword";
+
+    public final static String LAF_DARK_CLASSNAME = "com.formdev.flatlaf.FlatDarkLaf";
+    public final static String LAF_LIGHT_CLASSNAME = "com.formdev.flatlaf.FlatLightLaf";
+
+    public final static String DEFAULT_LAF = LAF_LIGHT_CLASSNAME;
 
     protected static final Preferences prefs = Preferences.userRoot().node("jPdfTool");
     private static final Map<String, Icon> icons = new HashMap<>();
@@ -91,7 +112,6 @@ public class UI extends JSplitPane {
 
         JLabel userPasswordLabel = new JLabel("User Password");
         userPasswordLabel.setLabelFor(userPasswordField);
-
 
         GridBagConstraints gcLabel = new GridBagConstraints();
         gcLabel.anchor = GridBagConstraints.NORTHWEST;
@@ -255,7 +275,6 @@ public class UI extends JSplitPane {
         gc.gridy++;
         panel.add(pageManipulation, gc);
 
-
         gcLabel.gridy++;
         gc.gridy++;
         panel.add(saveButton, gc);
@@ -273,7 +292,8 @@ public class UI extends JSplitPane {
                 "If you also want to define specific permissions - such as restricting printing or " +
                 "editing - you must set both an owner password and a user password.<br>" +
                 "The owner password always grants full control over the document, while the user password " +
-                "enforces only the permissions you've selected.</font></html>");
+                "enforces only the permissions you've selected.<br>" +
+                "Most tools use a random owner password.</font></html>");
 
         Font f = UIManager.getFont("Panel.font");
         FontMetrics fm = getFontMetrics(f);
@@ -282,7 +302,14 @@ public class UI extends JSplitPane {
 
         panel.add(info, gcLabel);
 
+        String ownerPassword = null;
         generateOwner.addActionListener(e -> ownerPasswordField.setText(UUID.randomUUID().toString()));
+        if (prefs.getBoolean(USER_PREF_STORE_OWNER_PASSWORD, false)) {
+            ownerPassword = prefs.get(USER_PREF_OWNER_PASSWORD, null);
+        }
+        if (ownerPassword == null)
+            ownerPassword = UUID.randomUUID().toString();
+        ownerPasswordField.setText(ownerPassword);
 
         DocumentListener passwordChecker = new DocumentListener() {
             @Override
@@ -316,61 +343,7 @@ public class UI extends JSplitPane {
         });
 
 
-        saveButton.addActionListener(e -> {
-            String ownerPwd = ownerPasswordField.getText().trim();
-            String userPwd = userPasswordField.getText().trim();
-
-            if (documentProxy != null) {
-                PDDocument document = documentProxy.getLoadedDocument();
-                if (document != null) {
-                    try {
-                        final Path orgFile = documentProxy.getPath();
-
-                        AccessPermission ap = new AccessPermission();
-                        ap.setCanPrint(allowPrinting.isSelected());
-                        ap.setCanModify(allowModification.isSelected());
-                        ap.setCanExtractContent(allowExtraction.isSelected());
-                        ap.setCanFillInForm(allowFillIn.isSelected());
-                        ap.setCanAssembleDocument(allowAssembly.isSelected());
-
-                        StandardProtectionPolicy spp = new StandardProtectionPolicy(ownerPwd, userPwd, ap);
-                        spp.setEncryptionKeyLength(128);
-                        document.protect(spp);
-
-                        JFileChooser chooser = getPdfChooser();
-                        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
-                        int result = chooser.showSaveDialog(this);
-                        if (result == JFileChooser.APPROVE_OPTION) {
-                            File selectedFile = chooser.getSelectedFile();
-
-                            Path selectedFilePath = selectedFile.toPath();
-                            if (Files.exists(selectedFilePath)) {
-                                if (askOverwrite(this, selectedFilePath)) {
-                                    // PdfBox can't write to the same file. Write into buffer, close original,
-                                    // then re-open it.
-                                    ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
-                                    document.save(os, compression.isSelected()
-                                            ? CompressParameters.DEFAULT_COMPRESSION : CompressParameters.NO_COMPRESSION);
-
-                                    documentProxy.close();
-                                    documentProxy = null;
-
-                                    Files.write(selectedFile.toPath(), os.toByteArray());
-
-                                    JOptionPane.showMessageDialog(this, "PDF stored:\n" + selectedFile, "Stored", JOptionPane.INFORMATION_MESSAGE);
-                                    selectPdf(orgFile.toFile());
-                                }
-                            } else {
-                                document.save(selectedFile);
-                                JOptionPane.showMessageDialog(this, "PDF stored:\n" + selectedFile);
-                            }
-                        }
-                    } catch (Exception ex) {
-                        JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-                    }
-                }
-            }
-        });
+        saveButton.addActionListener(e -> doSave());
 
         setLeftComponent(panel);
         JScrollPane scrollPane = new JScrollPane(pages);
@@ -379,6 +352,143 @@ public class UI extends JSplitPane {
         setDividerLocation(fm.charWidth('W') * 65);
         checkPassword();
         setSelectedPage(null);
+    }
+
+    private final JRadioButtonMenuItem lafLight = new JRadioButtonMenuItem("Light");
+    private final JRadioButtonMenuItem lafDark = new JRadioButtonMenuItem("Dark");
+    private final JCheckBox storeOwnerPassword = new JCheckBox("Remember Owner Password");
+
+    private JMenuBar menuBar;
+
+    protected void setLaf(String laf) {
+        try {
+            if (!Objects.equals(UIManager.getLookAndFeel().getClass().getName(), laf)) {
+                UIManager.setLookAndFeel(laf);
+                FlatLaf.updateUILater();
+                if (pdfChooser != null)
+                    SwingUtilities.updateComponentTreeUI(pdfChooser);
+                if (imageChooser != null)
+                    SwingUtilities.updateComponentTreeUI(imageChooser);
+                prefs.put(USER_PREF_LAF, laf);
+                System.out.println("Switched to " + laf);
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to switch LAF to " + laf);
+            e.printStackTrace(System.err);
+        }
+    }
+
+    public static String getPref(String key, String defaultValue) {
+        return prefs.get(key, defaultValue);
+    }
+
+    public synchronized JMenuBar getMenu() {
+        if (menuBar == null) {
+
+            lafDark.addActionListener(e -> setLaf(LAF_DARK_CLASSNAME));
+            lafLight.addActionListener(e -> setLaf(LAF_LIGHT_CLASSNAME));
+
+            menuBar = new JMenuBar();
+
+            JMenu laf = new JMenu("Look And Feel");
+            laf.add(lafLight);
+            laf.add(lafDark);
+            ButtonGroup lafGroup = new ButtonGroup();
+            lafGroup.add(lafLight);
+            lafGroup.add(lafDark);
+
+            storeOwnerPassword.setToolTipText(
+                    "<html>Stores the owner password in user preferences.<br>" +
+                            "Otherwise the owner password is generated randomly on each start." +
+                            "</html>");
+            storeOwnerPassword.addActionListener(e -> {
+                boolean sop = storeOwnerPassword.isSelected();
+                if (sop != prefs.getBoolean(USER_PREF_STORE_OWNER_PASSWORD, false)) {
+                    prefs.putBoolean(USER_PREF_STORE_OWNER_PASSWORD, sop);
+                    if (!sop)
+                        prefs.remove(USER_PREF_OWNER_PASSWORD);
+                }
+            });
+
+            JMenu options = new JMenu("Options");
+            options.add(storeOwnerPassword);
+            options.add(laf);
+
+            menuBar.add(options);
+        }
+
+        LookAndFeel currentLaf = UIManager.getLookAndFeel();
+        String currentLafClassName = currentLaf == null ? null : currentLaf.getClass().getName();
+
+        if (LAF_DARK_CLASSNAME.equals(currentLafClassName))
+            lafDark.setSelected(true);
+        if (LAF_LIGHT_CLASSNAME.equals(currentLafClassName))
+            lafLight.setSelected(true);
+        storeOwnerPassword.setSelected(prefs.getBoolean(USER_PREF_STORE_OWNER_PASSWORD, false));
+
+        return menuBar;
+    }
+
+    /**
+     * Requests a file name and saves the document.
+     */
+    protected void doSave() {
+        String ownerPwd = ownerPasswordField.getText().trim();
+        String userPwd = userPasswordField.getText().trim();
+
+        if (documentProxy != null) {
+            PDDocument document = documentProxy.getLoadedDocument();
+            if (document != null) {
+                try {
+                    final Path orgFile = documentProxy.getPath();
+
+                    AccessPermission ap = new AccessPermission();
+                    ap.setCanPrint(allowPrinting.isSelected());
+                    ap.setCanModify(allowModification.isSelected());
+                    ap.setCanExtractContent(allowExtraction.isSelected());
+                    ap.setCanFillInForm(allowFillIn.isSelected());
+                    ap.setCanAssembleDocument(allowAssembly.isSelected());
+
+                    StandardProtectionPolicy spp = new StandardProtectionPolicy(ownerPwd, userPwd, ap);
+                    spp.setEncryptionKeyLength(128);
+                    document.protect(spp);
+
+                    JFileChooser chooser = getPdfChooser();
+                    chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+                    int result = chooser.showSaveDialog(this);
+                    if (result == JFileChooser.APPROVE_OPTION) {
+                        File selectedFile = chooser.getSelectedFile();
+
+                        Path selectedFilePath = selectedFile.toPath();
+                        if (Files.exists(selectedFilePath)) {
+                            if (askOverwrite(this, selectedFilePath)) {
+                                // PdfBox can't write to the same file. Write into buffer, close original,
+                                // then re-open it.
+                                ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
+                                document.save(os, compression.isSelected()
+                                        ? CompressParameters.DEFAULT_COMPRESSION : CompressParameters.NO_COMPRESSION);
+
+                                documentProxy.close();
+                                documentProxy = null;
+
+                                Files.write(selectedFile.toPath(), os.toByteArray());
+
+                                JOptionPane.showMessageDialog(this, "PDF stored:\n" + selectedFile, "Stored", JOptionPane.INFORMATION_MESSAGE);
+                                selectPdf(orgFile.toFile());
+                            }
+                        } else {
+                            document.save(selectedFile);
+                            JOptionPane.showMessageDialog(this, "PDF stored:\n" + selectedFile);
+                        }
+                        if (prefs.getBoolean(USER_PREF_STORE_OWNER_PASSWORD, false)) {
+                            prefs.put(USER_PREF_OWNER_PASSWORD, ownerPwd);
+                        }
+                    }
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }
     }
 
     public static boolean askOverwrite(Component comp, Path file) {
@@ -473,7 +583,7 @@ public class UI extends JSplitPane {
             imageChooser = new JFileChooser();
         }
         imageChooser.setFileFilter(imageFilter);
-        String lastDir = prefs.get(USER_PREF_LAST_IMAGE_DIR, null);
+        String lastDir = getPref(USER_PREF_LAST_IMAGE_DIR, null);
         if (lastDir != null) {
             imageChooser.setCurrentDirectory(new File(lastDir));
         }
@@ -486,7 +596,7 @@ public class UI extends JSplitPane {
             pdfChooser = new JFileChooser();
             pdfChooser.setFileFilter(pdfFilter);
         }
-        String lastDir = prefs.get(USER_PREF_LAST_PDF_DIR, null);
+        String lastDir = getPref(USER_PREF_LAST_PDF_DIR, null);
         if (lastDir != null) {
             pdfChooser.setCurrentDirectory(new File(lastDir));
         }

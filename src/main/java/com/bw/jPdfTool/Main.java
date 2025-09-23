@@ -18,13 +18,19 @@ public class Main {
     protected void createUI() {
 
         FlatRobotoFont.installLazy();
-        // com.formdev.flatlaf.FlatDarkLaf.setup();
-        com.formdev.flatlaf.FlatLightLaf.setup();
-
         if (SystemInfo.isLinux) {
             JFrame.setDefaultLookAndFeelDecorated(true);
             JDialog.setDefaultLookAndFeelDecorated(true);
         }
+
+        String lafClassName = UI.getPref(UI.USER_PREF_LAF, UI.DEFAULT_LAF);
+        try {
+            UIManager.setLookAndFeel(lafClassName);
+        } catch (Exception e) {
+            System.err.println("Failed to set LAF " + lafClassName);
+        }
+
+        UI ui = new UI();
 
         JFrame frame = new JFrame("PDF Passwords & Rights");
 
@@ -37,7 +43,7 @@ public class Main {
         }
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
-        UI ui = new UI();
+        frame.setJMenuBar(ui.getMenu());
         frame.setLocationByPlatform(true);
         frame.setContentPane(ui);
         frame.setSize(1500, 600);
