@@ -46,7 +46,7 @@ public class Main {
         frame.setJMenuBar(ui.getMenu());
         frame.setLocationByPlatform(true);
         frame.setContentPane(ui);
-        frame.setSize(1500, 600);
+        frame.pack();
 
         frame.setVisible(true);
     }

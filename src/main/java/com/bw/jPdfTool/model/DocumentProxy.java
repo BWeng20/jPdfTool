@@ -1,6 +1,8 @@
 package com.bw.jPdfTool.model;
 
+import com.bw.jPdfTool.Log;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.multipdf.PDFMergerUtility;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageTree;
@@ -10,9 +12,10 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 import javax.swing.*;
 import java.awt.*;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 
 /**
@@ -20,39 +23,44 @@ import java.util.concurrent.Future;
  */
 public class DocumentProxy {
 
-    public final List<Page> pages = new ArrayList<>();
-    private final Path file;
+    private final List<Page> pages = new ArrayList<>();
+    private final List<Path> files = new ArrayList<>();
     private final List<PageConsumer> pageConsumerList = new ArrayList<>();
     private final List<DocumentConsumer> docConsumerList = new ArrayList<>();
-    public int pageCount = -1;
-    public boolean closed = false;
-    public String owerPassword4Load;
-    protected JPasswordField passwordField = new JPasswordField();
+    private boolean closed = false;
+    private String owerPassword4Load;
+    private final JPasswordField passwordField = new JPasswordField();
     private PDDocument document;
-    private PdfLoadWorker loadWorker;
+
+    private final Deque<PdfLoadWorker> loadWorker = new ArrayDeque<>();
+    private PdfLoadWorker currentLoader;
+
     private PdfRenderWorker renderWorker;
     private String error;
 
-    public DocumentProxy(Path file) {
-        this.file = file;
+    public DocumentProxy() {
     }
 
     /**
      * Triggers loading of the document in background
      *
-     * @return The future with the document. Completed, if document was already. loaded
+     * @return The future with the document.
      */
-    public synchronized Future<PDDocument> load() {
+    public synchronized Future<PDDocument> load(Path file) {
         ensuredNotClosed();
         synchronized (this) {
-            if (document == null && error == null) {
-                if (loadWorker == null) {
-                    loadWorker = new PdfLoadWorker();
-                    loadWorker.execute();
-                }
-                return loadWorker;
-            }
-            return CompletableFuture.completedFuture(document);
+            PdfLoadWorker lw = new PdfLoadWorker(file);
+            loadWorker.addLast(lw);
+            startNextLoader();
+            return lw;
+        }
+    }
+
+    protected synchronized void startNextLoader() {
+        if (currentLoader == null) {
+            currentLoader = loadWorker.pollFirst();
+            if (currentLoader != null)
+                currentLoader.execute();
         }
     }
 
@@ -65,8 +73,8 @@ public class DocumentProxy {
         return error;
     }
 
-    public Path getPath() {
-        return file;
+    public List<Path> getPaths() {
+        return files;
     }
 
     /**
@@ -81,19 +89,24 @@ public class DocumentProxy {
     /**
      * Helper to request the owner password from user.
      */
-    protected String requestOwnerPassword() {
-        Object[] message = {"Enter Owner Password:", passwordField};
-        int option = JOptionPane.showConfirmDialog(
-                null, message, "Owner Password needed",
-                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE
-        );
+    protected void requestOwnerPassword(Path file) {
+        SwingUtilities.invokeLater(() -> {
+            Object[] message = {"Enter Owner Password:", passwordField};
+            int option = JOptionPane.showConfirmDialog(
+                    null, message, "Owner Password needed",
+                    JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE
+            );
 
-        if (option == JOptionPane.OK_OPTION) {
-            char[] password = passwordField.getPassword();
-            return new String(password);
-        } else {
-            return null;
-        }
+            if (option == JOptionPane.OK_OPTION) {
+                owerPassword4Load = new String(passwordField.getPassword());
+                // retry
+                loadWorker.add(new PdfLoadWorker(file));
+                startNextLoader();
+            } else {
+                error = "File is protected.\nPassword needed.";
+                fireDocumentLoaded(null);
+            }
+        });
     }
 
     /**
@@ -147,7 +160,7 @@ public class DocumentProxy {
         }
         synchronized (this) {
             if (document != null) {
-                consumer.documentLoaded(document);
+                consumer.documentLoaded(document, files.isEmpty() ? null : files.get(0));
             } else if (error != null) {
                 consumer.failed(error);
             }
@@ -160,7 +173,7 @@ public class DocumentProxy {
         }
     }
 
-    protected void fireDocumentLoaded() {
+    protected void fireDocumentLoaded(Path file) {
         if (closed)
             return;
         List<DocumentConsumer> l;
@@ -170,9 +183,15 @@ public class DocumentProxy {
         for (var dc : l) {
             if (error == null) {
                 if (document != null)
-                    dc.documentLoaded(document);
+                    dc.documentLoaded(document, file);
             } else
                 dc.failed(error);
+        }
+        synchronized (pages) {
+            for (Page p : pages) {
+                if (p.image != null)
+                    firePageRendered(p);
+            }
         }
     }
 
@@ -192,9 +211,11 @@ public class DocumentProxy {
             }
             document = null;
         }
-        if (loadWorker != null) {
-            loadWorker.cancel(true);
-            loadWorker = null;
+        loadWorker.clear();
+        if (currentLoader != null) {
+            var cl = currentLoader;
+            currentLoader = null;
+            cl.cancel(true);
         }
         if (renderWorker != null) {
             renderWorker.cancel(true);
@@ -210,6 +231,7 @@ public class DocumentProxy {
      */
     public void movePage(int pageNb, int offset) {
         ensuredDocument();
+        int pageCount = pages.size();
         if (pageNb < 0 || pageNb > pageCount) {
             throw new IllegalArgumentException("Page " + pageNb + " is out of range");
         }
@@ -274,9 +296,8 @@ public class DocumentProxy {
 
         // 0-based index!
         document.removePage(pageIndex);
-        pageCount = document.getNumberOfPages();
-
         pages.remove(pageIndex);
+        int pageCount = pages.size();
         for (int i = 0; i < pageCount; ++i) {
             Page p = pages.get(i);
             p.pageNb = i + 1;
@@ -286,7 +307,7 @@ public class DocumentProxy {
     }
 
     private void refirePages() {
-        fireDocumentLoaded();
+        fireDocumentLoaded(null);
         boolean imageMissing = false;
         for (Page p : pages) {
             if (p.image == null)
@@ -317,6 +338,16 @@ public class DocumentProxy {
         return document.getPage(pageNb - 1);
     }
 
+    public void setOwnerPassword(String ownerPassword) {
+        if (ownerPassword != null) {
+            owerPassword4Load = ownerPassword.trim();
+            if (owerPassword4Load.isEmpty())
+                owerPassword4Load = null;
+        } else {
+            owerPassword4Load = null;
+        }
+    }
+
     /**
      * Interface to notify about rendered pages.
      */
@@ -334,14 +365,19 @@ public class DocumentProxy {
          *
          * @param document The document, never null
          */
-        void documentLoaded(PDDocument document);
+        void documentLoaded(PDDocument document, Path file);
 
         void failed(String error);
     }
 
     protected class PdfLoadWorker extends SwingWorker<PDDocument, Void> {
 
-        boolean passwordNeeded = false;
+        protected boolean passwordNeeded = false;
+        protected final Path file;
+
+        public PdfLoadWorker(Path file) {
+            this.file = file;
+        }
 
         @Override
         protected PDDocument doInBackground() {
@@ -349,7 +385,6 @@ public class DocumentProxy {
                 PDDocument document = owerPassword4Load != null
                         ? Loader.loadPDF(file.toFile(), owerPassword4Load)
                         : Loader.loadPDF(file.toFile());
-                pageCount = document.getNumberOfPages();
                 error = null;
                 return document;
             } catch (InvalidPasswordException ep) {
@@ -366,38 +401,43 @@ public class DocumentProxy {
         protected void done() {
             synchronized (DocumentProxy.this) {
                 try {
-                    document = get();
-                    if (loadWorker == PdfLoadWorker.this) {
-                        loadWorker = null;
-                        if (document == null && passwordNeeded) {
-                            String password = requestOwnerPassword();
-                            if (password != null) {
-                                owerPassword4Load = password;
-                                // retry
-                                loadWorker = new PdfLoadWorker();
-                                loadWorker.execute();
-                            } else {
-                                error = "File is protected.\nPassword needed.";
-                                fireDocumentLoaded();
+                    Log.debug("DONE (%s)", file);
+                    currentLoader = null;
+                    PDDocument document = get();
+                    if (!DocumentProxy.this.closed) {
+                        if (passwordNeeded) {
+                            requestOwnerPassword(file);
+                        } else {
+                            if (document != null) {
+                                if (DocumentProxy.this.document == null) {
+                                    DocumentProxy.this.document = document;
+                                    pages.clear();
+                                } else {
+                                    // Append pages
+                                    PDFMergerUtility pdfMergerUtility = new PDFMergerUtility();
+                                    pdfMergerUtility.appendDocument(DocumentProxy.this.document, document);
+                                    document.close();
+                                }
+                                int pageCount = DocumentProxy.this.document.getNumberOfPages();
+                                synchronized (pages) {
+                                    while (pages.size() < pageCount) {
+                                        Page page = new Page(DocumentProxy.this, pages.size() + 1, pageCount);
+                                        pages.add(page);
+                                    }
+                                }
+                                fireDocumentLoaded(file);
+                                Log.debug("Start renderer (%s)", file);
+
+                                PdfRenderWorker render = new PdfRenderWorker();
+                                render.execute();
                             }
                         }
-                    }
-                    if (document != null) {
-                        synchronized (pages) {
-                            pages.clear();
-                            for (int i = 0; i < pageCount; ++i) {
-                                Page page = new Page(DocumentProxy.this, i + 1, pageCount);
-                                pages.add(page);
-                            }
-                        }
-                        fireDocumentLoaded();
-                        PdfRenderWorker render = new PdfRenderWorker();
-                        render.execute();
                     }
                 } catch (Exception e) {
                     error = e.getMessage();
-                    fireDocumentLoaded();
+                    fireDocumentLoaded(null);
                 }
+                startNextLoader();
             }
         }
     }
@@ -416,6 +456,7 @@ public class DocumentProxy {
                 RenderingHints renderingHints = new RenderingHints(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 renderer.setRenderingHints(renderingHints);
 
+                int pageCount = pages.size();
                 for (int i = 0; i < pageCount; i++) {
                     if (closed)
                         break;
@@ -424,10 +465,12 @@ public class DocumentProxy {
                         page = pages.get(i);
                     }
                     if (page.image == null) {
+                        Log.debug("Render page #%d", i);
                         page.image = renderer.renderImageWithDPI(i, 300);
                         publish(page);
                     }
                 }
+                Log.debug("Render finished");
                 error = null;
             } catch (InvalidPasswordException ep) {
                 error = "File is encrypted and owner password\ndoesn't match";

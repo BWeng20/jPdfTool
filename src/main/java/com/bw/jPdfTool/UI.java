@@ -58,7 +58,7 @@ public class UI extends JSplitPane {
     public final static String USER_PREF_STORE_OWNER_PASSWORD = "storeOwnerPassword";
 
     /**
-     * User preferences key for the owner password (if option is enabled)).
+     * User preferences key for the owner password (if option is enabled).
      */
     public final static String USER_PREF_OWNER_PASSWORD = "ownerPassword";
 
@@ -69,6 +69,7 @@ public class UI extends JSplitPane {
 
     protected static final Preferences prefs = Preferences.userRoot().node("jPdfTool");
     private static final Map<String, Icon> icons = new HashMap<>();
+    protected static JFileChooser savePdfChooser;
     protected static JFileChooser pdfChooser;
     protected static JFileChooser imageChooser;
     protected static FileNameExtensionFilter pdfFilter = new FileNameExtensionFilter("PDF-Files (*.pdf)", "pdf");
@@ -78,7 +79,8 @@ public class UI extends JSplitPane {
     private final JTextField userPasswordField = new JTextField();
     private final JCheckBox allowPrinting = new JCheckBox("Printing");
     private final JCheckBox allowExtraction = new JCheckBox("Extraction");
-    private final JTextField filePathField = new JTextField();
+    private final DefaultListModel<String> filePathsModel = new DefaultListModel<>();
+    private final JList<String> filePaths = new JList<>(filePathsModel);
     private final JButton saveButton = new JButton("Write To File");
     private final JCheckBox allowModification = new JCheckBox("Modify");
     private final JCheckBox allowFillIn = new JCheckBox("Fill Form");
@@ -97,15 +99,24 @@ public class UI extends JSplitPane {
     public UI() {
         super(JSplitPane.HORIZONTAL_SPLIT);
 
+        Font f = UIManager.getFont("Panel.font");
+        final FontMetrics fm = getFontMetrics(f);
+        final int charWith = fm.charWidth('W');
+
         new DropTarget(this, new DropTargetAdapter() {
+
             @Override
             public void drop(DropTargetDropEvent dtde) {
                 try {
-                    dtde.acceptDrop(DnDConstants.ACTION_COPY);
+                    dtde.acceptDrop(DnDConstants.ACTION_COPY_OR_MOVE);
                     java.util.List<File> droppedFiles = (java.util.List<File>) dtde.getTransferable()
                             .getTransferData(DataFlavor.javaFileListFlavor);
                     if (!droppedFiles.isEmpty()) {
-                        selectPdf( droppedFiles.get(0));
+                        if (dtde.getDropAction() == DnDConstants.ACTION_COPY) {
+                            appendPdf(droppedFiles.get(0));
+                        } else {
+                            selectPdf(droppedFiles.get(0));
+                        }
                     }
                 } catch (Exception ex) {
                     ex.printStackTrace(System.err);
@@ -116,7 +127,6 @@ public class UI extends JSplitPane {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
-        filePathField.setEditable(false);
         JButton generateOwner = new JButton("Random");
 
         compression.setSelected(true);
@@ -125,9 +135,12 @@ public class UI extends JSplitPane {
         rotation.setEditable(false);
 
         JButton browseButton = new JButton("...");
+        JButton browseAppendButton = new JButton("+");
 
-        JLabel filePathLabel = new JLabel("Path to source");
-        filePathLabel.setLabelFor(filePathField);
+        JLabel filePathLabel = new JLabel("Loaded files");
+
+        JScrollPane filePathScroller = new JScrollPane(filePaths);
+        filePathLabel.setLabelFor(filePathScroller);
 
         JLabel ownerPasswordLabel = new JLabel("Owner Password");
         ownerPasswordLabel.setLabelFor(ownerPasswordField);
@@ -153,31 +166,34 @@ public class UI extends JSplitPane {
         gc.gridwidth = 1;
 
         panel.add(filePathLabel, gcLabel);
-        panel.add(filePathField, gc);
+        filePathScroller.setMinimumSize(new Dimension(0, fm.getHeight() * 5));
+        panel.add(filePathScroller, gc);
         gc.gridx++;
         gc.weightx = 0;
 
-        panel.add(browseButton, gc);
+        JPanel browseButtons = new JPanel(new GridLayout(2, 1));
+        browseButtons.add(browseButton);
+        browseButtons.add(browseAppendButton);
+
+        gc.anchor = GridBagConstraints.NORTHWEST;
+        panel.add(browseButtons, gc);
+
+        gcLabel.gridy++;
+        panel.add(ownerPasswordLabel, gcLabel);
         gc.weightx = 1;
         gc.gridx--;
-        gc.gridwidth = 2;
-
         gc.gridy++;
-        gcLabel.gridy++;
         gc.gridwidth = 1;
-        panel.add(ownerPasswordLabel, gcLabel);
         panel.add(ownerPasswordField, gc);
         gc.gridx++;
         gc.weightx = 0;
         panel.add(generateOwner, gc);
+        gcLabel.gridy++;
+        panel.add(userPasswordLabel, gcLabel);
         gc.weightx = 1;
         gc.gridx--;
         gc.gridwidth = 2;
-
         gc.gridy++;
-        gcLabel.gridy++;
-
-        panel.add(userPasswordLabel, gcLabel);
         panel.add(userPasswordField, gc);
 
         gc.gridy++;
@@ -203,42 +219,19 @@ public class UI extends JSplitPane {
 
         deleteButton = new JButton(getIcon("delete"));
         deleteButton.setToolTipText("Deletes the current page.");
-        deleteButton.addActionListener(e -> {
-            PageWidget pw = pages.getSelectedPage();
-            if (pw != null) {
-                Page page = pw.getPage();
-                page.document.deletePage(page.pageNb);
-            }
-        });
+        deleteButton.addActionListener(e -> doDeletePage());
 
         rotateClockwiseButton = new JButton(getIcon("rotateClockwise"));
         rotateClockwiseButton.setToolTipText("Rotates the current page clockwise.");
-        rotateClockwiseButton.addActionListener(e -> {
-            PageWidget pw = pages.getSelectedPage();
-            if (pw != null) {
-                Page page = pw.getPage();
-                page.rotatePage(90);
-            }
-        });
+        rotateClockwiseButton.addActionListener(e -> doRotateClockwise());
 
         moveLeft = new JButton(getIcon("moveLeft"));
         moveLeft.setToolTipText("Moves the current page up.");
-        moveLeft.addActionListener(e -> {
-                    PageWidget pw = pages.getSelectedPage();
-                    if (pw != null) {
-                        pw.getPage().movePage(-1);
-                    }
-                }
-        );
+        moveLeft.addActionListener(e -> doMoveLeft());
 
         moveRight = new JButton(getIcon("moveRight"));
         moveRight.setToolTipText("Moves the current page down.");
-        moveRight.addActionListener(e -> {
-            PageWidget pw = pages.getSelectedPage();
-            if (pw != null) {
-                pw.getPage().movePage(1);
-            }
-        });
+        moveRight.addActionListener(e -> doMoveRight());
 
         images = new JButton("Images");
         images.setToolTipText("Shows embedded images of the current page.");
@@ -317,10 +310,6 @@ public class UI extends JSplitPane {
                 "enforces only the permissions you've selected.<br>" +
                 "Most tools use a random owner password.</font></html>");
 
-        Font f = UIManager.getFont("Panel.font");
-        FontMetrics fm = getFontMetrics(f);
-
-        setPreferredSize(new Dimension(fm.charWidth('W') * 20, fm.getHeight() * 30));
 
         panel.add(info, gcLabel);
 
@@ -353,25 +342,18 @@ public class UI extends JSplitPane {
         ownerPasswordField.getDocument().addDocumentListener(passwordChecker);
         userPasswordField.getDocument().addDocumentListener(passwordChecker);
 
-        browseButton.addActionListener(e -> {
-            JFileChooser chooser = getPdfChooser();
-            chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
-            int result = chooser.showOpenDialog(this);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File selectedFile = chooser.getSelectedFile();
-
-                selectPdf(selectedFile);
-            }
-        });
-
+        browseButton.addActionListener(e -> doBrowsePdf());
+        browseAppendButton.addActionListener(e -> doBrowseAdditionalPdf());
 
         saveButton.addActionListener(e -> doSave());
 
+
         setLeftComponent(panel);
         JScrollPane scrollPane = new JScrollPane(pages);
+        scrollPane.getViewport().setPreferredSize(new Dimension(charWith * 30, fm.getHeight() * 40));
         setRightComponent(scrollPane);
 
-        setDividerLocation(fm.charWidth('W') * 65);
+        setDividerLocation(charWith * 65);
         checkPassword();
         setSelectedPage(null);
     }
@@ -452,6 +434,84 @@ public class UI extends JSplitPane {
     }
 
     /**
+     * Opens file browser to load another pdf.
+     */
+    protected void doBrowsePdf() {
+        JFileChooser chooser = getPdfChooser();
+        chooser.setDialogTitle("Select PDF(s) to Load...");
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setMultiSelectionEnabled(true);
+        int result = chooser.showOpenDialog(this);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            File[] selectedFiles = chooser.getSelectedFiles();
+            if (selectedFiles.length > 0) {
+                selectPdf(selectedFiles[0]);
+                for (int i = 1; i < selectedFiles.length; ++i)
+                    appendPdf(selectedFiles[i]);
+            }
+        }
+    }
+
+    /**
+     * Opens file browser to load another pdf.
+     */
+    protected void doBrowseAdditionalPdf() {
+        JFileChooser chooser = getPdfChooser();
+        chooser.setDialogTitle("Select PDF(s) to Append...");
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setMultiSelectionEnabled(true);
+        int result = chooser.showOpenDialog(this);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            File[] selectedFiles = chooser.getSelectedFiles();
+            if (selectedFiles.length > 0)
+                for (File selectedFile : selectedFiles) appendPdf(selectedFile);
+        }
+    }
+
+
+    /**
+     * Moves the selected page.
+     */
+    protected void doMoveRight() {
+        PageWidget pw = pages.getSelectedPage();
+        if (pw != null) {
+            pw.getPage().movePage(1);
+        }
+    }
+
+    /**
+     * Moves the selected page.
+     */
+    protected void doMoveLeft() {
+        PageWidget pw = pages.getSelectedPage();
+        if (pw != null) {
+            pw.getPage().movePage(-1);
+        }
+    }
+
+    /**
+     * Rotates the selected page.
+     */
+    protected void doRotateClockwise() {
+        PageWidget pw = pages.getSelectedPage();
+        if (pw != null) {
+            Page page = pw.getPage();
+            page.rotatePage(90);
+        }
+    }
+
+    /**
+     * Deletes the selected page.
+     */
+    protected void doDeletePage() {
+        PageWidget pw = pages.getSelectedPage();
+        if (pw != null) {
+            Page page = pw.getPage();
+            page.document.deletePage(page.pageNb);
+        }
+    }
+
+    /**
      * Requests a file name and saves the document.
      */
     protected void doSave() {
@@ -462,8 +522,6 @@ public class UI extends JSplitPane {
             PDDocument document = documentProxy.getLoadedDocument();
             if (document != null) {
                 try {
-                    final Path orgFile = documentProxy.getPath();
-
                     AccessPermission ap = new AccessPermission();
                     ap.setCanPrint(allowPrinting.isSelected());
                     ap.setCanModify(allowModification.isSelected());
@@ -475,8 +533,7 @@ public class UI extends JSplitPane {
                     spp.setEncryptionKeyLength(128);
                     document.protect(spp);
 
-                    JFileChooser chooser = getPdfChooser();
-                    chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+                    JFileChooser chooser = getSavePdfChooser();
                     int result = chooser.showSaveDialog(this);
                     if (result == JFileChooser.APPROVE_OPTION) {
                         File selectedFile = chooser.getSelectedFile();
@@ -496,13 +553,13 @@ public class UI extends JSplitPane {
                                 Files.write(selectedFile.toPath(), os.toByteArray());
 
                                 JOptionPane.showMessageDialog(this,
-                                        "<html><font size='+1'>Stored PDF as<br><b>" + selectedFile+"</b></font></html>", "Stored", JOptionPane.INFORMATION_MESSAGE );
-                                selectPdf(orgFile.toFile());
+                                        "<html><font size='+1'>Stored PDF as<br><b>" + selectedFile + "</b></font></html>", "Stored", JOptionPane.INFORMATION_MESSAGE);
+                                selectPdf(selectedFile);
                             }
                         } else {
                             document.save(selectedFile);
                             JOptionPane.showMessageDialog(this,
-                                    "<html><font size='+1'>Stored PDF as<br><b>" + selectedFile+"</b></font></html>", "Stored", JOptionPane.INFORMATION_MESSAGE );
+                                    "<html><font size='+1'>Stored PDF as<br><b>" + selectedFile + "</b></font></html>", "Stored", JOptionPane.INFORMATION_MESSAGE);
                         }
                         if (prefs.getBoolean(USER_PREF_STORE_OWNER_PASSWORD, false)) {
                             prefs.put(USER_PREF_OWNER_PASSWORD, ownerPwd);
@@ -558,39 +615,52 @@ public class UI extends JSplitPane {
         }
     }
 
+    protected void appendPdf(File file) {
+        if (documentProxy == null)
+            selectPdf(file);
+        else {
+            String parent = file.getParent();
+            if (parent != null)
+                prefs.put(USER_PREF_LAST_PDF_DIR, parent);
+            documentProxy.setOwnerPassword(ownerPasswordField.getText());
+            documentProxy.load(file.toPath());
+        }
+    }
+
     /**
      * Select a pdf file for preview and processing.
      */
     protected void selectPdf(File selectedFile) {
-        filePathField.setText(selectedFile.getAbsolutePath());
+        selectedFile = selectedFile.getAbsoluteFile();
+        filePathsModel.clear();
         String parent = selectedFile.getParent();
-        if ( parent != null)
+        if (parent != null)
             prefs.put(USER_PREF_LAST_PDF_DIR, parent);
         if (documentProxy != null) {
             documentProxy.close();
         }
         pages.clear();
 
-        documentProxy = new DocumentProxy(selectedFile.toPath());
-        documentProxy.owerPassword4Load = ownerPasswordField.getText().trim();
-        if (documentProxy.owerPassword4Load.isEmpty())
-            documentProxy.owerPassword4Load = null;
+        documentProxy = new DocumentProxy();
+        documentProxy.setOwnerPassword(ownerPasswordField.getText());
 
         documentProxy.addDocumentConsumer(new DocumentProxy.DocumentConsumer() {
             @Override
-            public void documentLoaded(PDDocument document) {
+            public void documentLoaded(PDDocument document, Path file) {
                 saveButton.setEnabled(document != null);
+                if (file != null)
+                    filePathsModel.addElement(file.toString());
             }
 
             @Override
             public void failed(String error) {
                 saveButton.setEnabled(false);
-                filePathField.setText("");
+                filePathsModel.addElement(error);
                 documentProxy = null;
             }
         });
         pages.setDocument(documentProxy);
-        documentProxy.load();
+        documentProxy.load(selectedFile.toPath());
     }
 
     protected void checkPassword() {
@@ -624,10 +694,29 @@ public class UI extends JSplitPane {
         }
         String lastDir = getPref(USER_PREF_LAST_PDF_DIR, null);
         if (lastDir != null) {
+            Log.debug("Last PDF Directory '%s'", lastDir);
             pdfChooser.setCurrentDirectory(new File(lastDir));
         }
         return pdfChooser;
     }
+
+    public static JFileChooser getSavePdfChooser() {
+        if (savePdfChooser == null) {
+            savePdfChooser = new JFileChooser();
+            savePdfChooser.setDialogTitle("Select PDF to Save...");
+            savePdfChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+            savePdfChooser.setMultiSelectionEnabled(false);
+            savePdfChooser.setFileFilter(pdfFilter);
+        }
+        String lastDir = getPref(USER_PREF_LAST_PDF_DIR, null);
+        if (lastDir != null) {
+            Log.debug("Last PDF Directory '%s'", lastDir);
+            savePdfChooser.setCurrentDirectory(new File(lastDir));
+        }
+
+        return savePdfChooser;
+    }
+
 
     PageImageViewer pageImageViewer;
     JDialog imageExtractorDialog;

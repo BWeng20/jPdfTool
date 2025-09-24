@@ -12,6 +12,7 @@ import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -41,7 +42,7 @@ public class PageWidgetContainer extends JComponent {
     };
     private final DocumentProxy.DocumentConsumer docConsumer = new DocumentProxy.DocumentConsumer() {
         @Override
-        public void documentLoaded(PDDocument document) {
+        public void documentLoaded(PDDocument document, Path file) {
             int idx = getSelectedPageIndex();
             removeAll();
             widgets.clear();
@@ -240,7 +241,6 @@ public class PageWidgetContainer extends JComponent {
     protected JScrollPane getScrollPane() {
         return ((JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, this));
     }
-
 
     public void setErrorText(String error) {
         // TODO
