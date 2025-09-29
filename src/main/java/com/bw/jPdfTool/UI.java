@@ -1,6 +1,7 @@
 package com.bw.jPdfTool;
 
 import com.bw.jPdfTool.model.DocumentProxy;
+import com.bw.jPdfTool.model.MergeOptions;
 import com.bw.jPdfTool.model.Page;
 import com.bw.jtools.svg.SVGConverter;
 import com.bw.jtools.ui.ShapeIcon;
@@ -20,6 +21,9 @@ import java.awt.dnd.DnDConstants;
 import java.awt.dnd.DropTarget;
 import java.awt.dnd.DropTargetAdapter;
 import java.awt.dnd.DropTargetDropEvent;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.MouseAdapter;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
@@ -29,7 +33,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.prefs.Preferences;
 
 /**
  * Main panel to show the pdf tool. Wrap this panel into a frame to create an app.
@@ -37,37 +40,7 @@ import java.util.prefs.Preferences;
  */
 public class UI extends JSplitPane {
 
-    /**
-     * User preferences key for the last PDF directory the user selected.
-     */
-    public final static String USER_PREF_LAST_PDF_DIR = "lastDir";
 
-    /**
-     * User preferences key for the last image directory the user selected.
-     */
-    public final static String USER_PREF_LAST_IMAGE_DIR = "lastImageDir";
-
-    /**
-     * User preferences key for the last Look And Feel selected.
-     */
-    public final static String USER_PREF_LAF = "laf";
-
-    /**
-     * User preferences key for the owner password option.
-     */
-    public final static String USER_PREF_STORE_OWNER_PASSWORD = "storeOwnerPassword";
-
-    /**
-     * User preferences key for the owner password (if option is enabled).
-     */
-    public final static String USER_PREF_OWNER_PASSWORD = "ownerPassword";
-
-    public final static String LAF_DARK_CLASSNAME = "com.formdev.flatlaf.FlatDarkLaf";
-    public final static String LAF_LIGHT_CLASSNAME = "com.formdev.flatlaf.FlatLightLaf";
-
-    public final static String DEFAULT_LAF = LAF_LIGHT_CLASSNAME;
-
-    protected static final Preferences prefs = Preferences.userRoot().node("jPdfTool");
     private static final Map<String, Icon> icons = new HashMap<>();
     protected static JFileChooser savePdfChooser;
     protected static JFileChooser pdfChooser;
@@ -93,8 +66,12 @@ public class UI extends JSplitPane {
     private final JButton images;
     private final JTextField rotation = new JTextField();
     private final JLabel pageNb = new JLabel();
+    private final JLabel quality = new JLabel();
     private final PageWidgetContainer pages = new PageWidgetContainer();
     protected DocumentProxy documentProxy;
+    private PageWidget selectedPage;
+
+    protected final RenderQueue renderQueue = new RenderQueue();
 
     public UI() {
         super(JSplitPane.HORIZONTAL_SPLIT);
@@ -113,7 +90,7 @@ public class UI extends JSplitPane {
                             .getTransferData(DataFlavor.javaFileListFlavor);
                     if (!droppedFiles.isEmpty()) {
                         if (dtde.getDropAction() == DnDConstants.ACTION_COPY) {
-                            appendPdf(droppedFiles.get(0));
+                            appendPdf(droppedFiles.get(0), new MergeOptions());
                         } else {
                             selectPdf(droppedFiles.get(0));
                         }
@@ -259,6 +236,12 @@ public class UI extends JSplitPane {
         pmGc.gridx = 1;
         pageManipulation.add(rotation, pmGc);
 
+        pmGc.gridy++;
+        pmGc.gridx = 0;
+        pmGc.gridwidth = 2;
+        pageManipulation.add(quality, pmGc);
+
+        pmGc.gridwidth = 1;
         pmGc.gridx = 2;
         pmGc.gridy = 0;
         pmGc.fill = GridBagConstraints.NONE;
@@ -314,9 +297,10 @@ public class UI extends JSplitPane {
         panel.add(info, gcLabel);
 
         String ownerPassword = null;
+
         generateOwner.addActionListener(e -> ownerPasswordField.setText(UUID.randomUUID().toString()));
-        if (prefs.getBoolean(USER_PREF_STORE_OWNER_PASSWORD, false)) {
-            ownerPassword = prefs.get(USER_PREF_OWNER_PASSWORD, null);
+        if (Preferences.getInstance().getBoolean(Preferences.USER_PREF_STORE_OWNER_PASSWORD, false)) {
+            ownerPassword = Preferences.getInstance().getString(Preferences.USER_PREF_OWNER_PASSWORD, null);
         }
         if (ownerPassword == null)
             ownerPassword = UUID.randomUUID().toString();
@@ -343,7 +327,12 @@ public class UI extends JSplitPane {
         userPasswordField.getDocument().addDocumentListener(passwordChecker);
 
         browseButton.addActionListener(e -> doBrowsePdf());
-        browseAppendButton.addActionListener(e -> doBrowseAdditionalPdf());
+        browseAppendButton.addActionListener(e -> {
+            if (documentProxy == null)
+                doBrowsePdf();
+            else
+                doBrowseAdditionalPdf();
+        });
 
         saveButton.addActionListener(e -> doSave());
 
@@ -356,11 +345,37 @@ public class UI extends JSplitPane {
         setDividerLocation(charWith * 65);
         checkPassword();
         setSelectedPage(null);
+
+        pages.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                if (selectedPage != null) {
+                    quality.setText(String.format("%d dpi (x %.2f)", selectedPage.getPage().dpi, selectedPage.getScale()));
+                }
+            }
+        });
+
+        renderQueue.start();
     }
 
     private final JRadioButtonMenuItem lafLight = new JRadioButtonMenuItem("Light");
     private final JRadioButtonMenuItem lafDark = new JRadioButtonMenuItem("Dark");
     private final JCheckBox storeOwnerPassword = new JCheckBox("Remember Owner Password");
+
+    private final JPrefCheckBoxMenuItem viewQualityAA
+            = new JPrefCheckBoxMenuItem("Antialiasing", Preferences.USER_PREF_VIEWER_ANTIALIASING,
+            Preferences.USER_PREF_VIEWER_ANTIALIASING_DEFAULT);
+
+    private final JRadioButtonMenuItem viewQualityInterpolBiCubic = new JPrefRadioButtonMenuItem(
+            "Interpolation bi-cubic", Preferences.USER_PREF_VIEWER_INTERPOLATE_BI_CUBIC, false, true);
+    private final JRadioButtonMenuItem viewQualityInterpolBiLinear = new JPrefRadioButtonMenuItem(
+            "Interpolation bi-linear", Preferences.USER_PREF_VIEWER_INTERPOLATE_BI_CUBIC, true, false);
+
+    private final JRadioButtonMenuItem viewQualityRenderFast = new JPrefRadioButtonMenuItem(
+            "Rendering for speed", Preferences.USER_PREF_VIEWER_RENDER_QUALITY, true, false);
+    private final JRadioButtonMenuItem viewQualityRenderQuality = new JPrefRadioButtonMenuItem(
+            "Rendering for quality", Preferences.USER_PREF_VIEWER_RENDER_QUALITY, false, true);
+
 
     private JMenuBar menuBar;
 
@@ -373,8 +388,9 @@ public class UI extends JSplitPane {
                     SwingUtilities.updateComponentTreeUI(pdfChooser);
                 if (imageChooser != null)
                     SwingUtilities.updateComponentTreeUI(imageChooser);
-                prefs.put(USER_PREF_LAF, laf);
-                System.out.println("Switched to " + laf);
+                SwingUtilities.updateComponentTreeUI(mergeOptions);
+                Preferences.getInstance().set(Preferences.USER_PREF_LAF, laf);
+                Log.info("Switched to %s", laf);
             }
         } catch (Exception e) {
             System.err.println("Failed to switch LAF to " + laf);
@@ -383,14 +399,14 @@ public class UI extends JSplitPane {
     }
 
     public static String getPref(String key, String defaultValue) {
-        return prefs.get(key, defaultValue);
+        return Preferences.getInstance().getString(key, defaultValue);
     }
 
     public synchronized JMenuBar getMenu() {
         if (menuBar == null) {
 
-            lafDark.addActionListener(e -> setLaf(LAF_DARK_CLASSNAME));
-            lafLight.addActionListener(e -> setLaf(LAF_LIGHT_CLASSNAME));
+            lafDark.addActionListener(e -> setLaf(Preferences.LAF_DARK_CLASSNAME));
+            lafLight.addActionListener(e -> setLaf(Preferences.LAF_LIGHT_CLASSNAME));
 
             menuBar = new JMenuBar();
 
@@ -407,16 +423,58 @@ public class UI extends JSplitPane {
                             "</html>");
             storeOwnerPassword.addActionListener(e -> {
                 boolean sop = storeOwnerPassword.isSelected();
-                if (sop != prefs.getBoolean(USER_PREF_STORE_OWNER_PASSWORD, false)) {
-                    prefs.putBoolean(USER_PREF_STORE_OWNER_PASSWORD, sop);
+                var prefs = Preferences.getInstance();
+                if (sop != prefs.getBoolean(Preferences.USER_PREF_STORE_OWNER_PASSWORD, false)) {
+                    prefs.set(Preferences.USER_PREF_STORE_OWNER_PASSWORD, sop);
                     if (!sop)
-                        prefs.remove(USER_PREF_OWNER_PASSWORD);
+                        prefs.remove(Preferences.USER_PREF_OWNER_PASSWORD);
                 }
             });
+
+            JMenu renderQuality = new JMenu("Render Quality");
+
+            int[] dpis = new int[]{150, 300, 600, 1200};
+
+            ButtonGroup dpiGroup = new ButtonGroup();
+
+            int dpiSetting = Preferences.getInstance().getInt(Preferences.USER_PREF_DPI, 300);
+
+            for (int dpi : dpis) {
+                JRadioButtonMenuItem dpiItem = new JRadioButtonMenuItem(String.format("%d dpi", dpi));
+                dpiItem.setSelected(dpi == dpiSetting);
+                dpiGroup.add(dpiItem);
+                renderQuality.add(dpiItem);
+                final int dpiFinal = dpi;
+                dpiItem.addActionListener(e -> setDpi(dpiFinal));
+            }
 
             JMenu options = new JMenu("Options");
             options.add(storeOwnerPassword);
             options.add(laf);
+            options.add(renderQuality);
+
+            if (Log.DEBUG) {
+                JMenu viewerQuality = new JMenu("Viewer Quality (debug mode)");
+
+                viewerQuality.add(viewQualityAA);
+                viewerQuality.addSeparator();
+
+                ButtonGroup interpolateGroup = new ButtonGroup();
+                interpolateGroup.add(viewQualityInterpolBiLinear);
+                viewerQuality.add(viewQualityInterpolBiLinear);
+                interpolateGroup.add(viewQualityInterpolBiCubic);
+                viewerQuality.add(viewQualityInterpolBiCubic);
+
+                viewerQuality.addSeparator();
+
+                ButtonGroup qualityRenderGroup = new ButtonGroup();
+                qualityRenderGroup.add(viewQualityRenderFast);
+                viewerQuality.add(viewQualityRenderFast);
+                qualityRenderGroup.add(viewQualityRenderQuality);
+                viewerQuality.add(viewQualityRenderQuality);
+
+                options.add(viewerQuality);
+            }
 
             menuBar.add(options);
         }
@@ -424,13 +482,20 @@ public class UI extends JSplitPane {
         LookAndFeel currentLaf = UIManager.getLookAndFeel();
         String currentLafClassName = currentLaf == null ? null : currentLaf.getClass().getName();
 
-        if (LAF_DARK_CLASSNAME.equals(currentLafClassName))
+        if (Preferences.LAF_DARK_CLASSNAME.equals(currentLafClassName))
             lafDark.setSelected(true);
-        if (LAF_LIGHT_CLASSNAME.equals(currentLafClassName))
+        if (Preferences.LAF_LIGHT_CLASSNAME.equals(currentLafClassName))
             lafLight.setSelected(true);
-        storeOwnerPassword.setSelected(prefs.getBoolean(USER_PREF_STORE_OWNER_PASSWORD, false));
+
+        storeOwnerPassword.setSelected(Preferences.getInstance().getBoolean(
+                Preferences.USER_PREF_STORE_OWNER_PASSWORD, false));
 
         return menuBar;
+    }
+
+
+    protected void setDpi(int dpi) {
+        Preferences.getInstance().set(Preferences.USER_PREF_DPI, dpi);
     }
 
     /**
@@ -444,13 +509,16 @@ public class UI extends JSplitPane {
         int result = chooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
             File[] selectedFiles = chooser.getSelectedFiles();
+            MergeOptions mo = new MergeOptions();
             if (selectedFiles.length > 0) {
                 selectPdf(selectedFiles[0]);
                 for (int i = 1; i < selectedFiles.length; ++i)
-                    appendPdf(selectedFiles[i]);
+                    appendPdf(selectedFiles[i], mo);
             }
         }
     }
+
+    private final MergeOptionPanel mergeOptions = new MergeOptionPanel();
 
     /**
      * Opens file browser to load another pdf.
@@ -460,12 +528,19 @@ public class UI extends JSplitPane {
         chooser.setDialogTitle("Select PDF(s) to Append...");
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setMultiSelectionEnabled(true);
-        int result = chooser.showOpenDialog(this);
-        if (result == JFileChooser.APPROVE_OPTION) {
-            File[] selectedFiles = chooser.getSelectedFiles();
-            if (selectedFiles.length > 0)
-                for (File selectedFile : selectedFiles) appendPdf(selectedFile);
+        try {
+            mergeOptions.setOriginalPageCount(documentProxy.getPageCount());
+            mergeOptions.install(chooser);
+            int result = chooser.showOpenDialog(this);
+            if (result == JFileChooser.APPROVE_OPTION) {
+                File[] selectedFiles = chooser.getSelectedFiles();
+                MergeOptions mo = mergeOptions.getMergeOptions();
+                for (File selectedFile : selectedFiles) appendPdf(selectedFile, mo);
+            }
+        } finally {
+            mergeOptions.uninstall(chooser);
         }
+
     }
 
 
@@ -561,8 +636,9 @@ public class UI extends JSplitPane {
                             JOptionPane.showMessageDialog(this,
                                     "<html><font size='+1'>Stored PDF as<br><b>" + selectedFile + "</b></font></html>", "Stored", JOptionPane.INFORMATION_MESSAGE);
                         }
-                        if (prefs.getBoolean(USER_PREF_STORE_OWNER_PASSWORD, false)) {
-                            prefs.put(USER_PREF_OWNER_PASSWORD, ownerPwd);
+                        var prefs = Preferences.getInstance();
+                        if (prefs.getBoolean(Preferences.USER_PREF_STORE_OWNER_PASSWORD, false)) {
+                            prefs.set(Preferences.USER_PREF_OWNER_PASSWORD, ownerPwd);
                         }
                     }
                 } catch (Exception ex) {
@@ -600,6 +676,7 @@ public class UI extends JSplitPane {
     }
 
     private void setSelectedPage(PageWidget page) {
+        selectedPage = page;
         boolean enabled = page != null;
         deleteButton.setEnabled(enabled);
         rotateClockwiseButton.setEnabled(enabled);
@@ -608,22 +685,48 @@ public class UI extends JSplitPane {
         images.setEnabled(enabled);
         if (enabled) {
             pageNb.setText("Page " + page.getPageNumber());
+            quality.setText(String.format("%d dpi (x %.2f)", page.getPage().dpi, page.getScale()));
             rotation.setText(page.getPage().getRotation() + " °");
         } else {
             rotation.setText("");
             pageNb.setText("<html><i>Select a Page</i></hml>");
+            quality.setText("");
         }
     }
 
-    protected void appendPdf(File file) {
+
+    protected void appendPdf(File file, MergeOptions mo) {
         if (documentProxy == null)
             selectPdf(file);
         else {
             String parent = file.getParent();
             if (parent != null)
-                prefs.put(USER_PREF_LAST_PDF_DIR, parent);
+                Preferences.getInstance().set(Preferences.USER_PREF_LAST_PDF_DIR, parent);
+
             documentProxy.setOwnerPassword(ownerPasswordField.getText());
-            documentProxy.load(file.toPath());
+            documentProxy.load(file.toPath(), mo);
+        }
+    }
+
+
+    private boolean busy;
+    private JPanel glassPane;
+
+
+    public void setBusy(boolean busy) {
+        if (this.busy != busy) {
+            this.busy = busy;
+            Main.mainWindow.setCursor(Cursor.getPredefinedCursor(busy ? Cursor.WAIT_CURSOR : Cursor.DEFAULT_CURSOR));
+            if (glassPane == null) {
+                glassPane = new JPanel();
+                glassPane.setOpaque(false);
+                glassPane.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+                glassPane.addMouseListener(new MouseAdapter() {
+                }); // Block mouse events
+                Main.mainWindow.setGlassPane(glassPane);
+
+                glassPane.setVisible(busy);
+            }
         }
     }
 
@@ -635,13 +738,13 @@ public class UI extends JSplitPane {
         filePathsModel.clear();
         String parent = selectedFile.getParent();
         if (parent != null)
-            prefs.put(USER_PREF_LAST_PDF_DIR, parent);
+            Preferences.getInstance().set(Preferences.USER_PREF_LAST_PDF_DIR, parent);
         if (documentProxy != null) {
             documentProxy.close();
         }
         pages.clear();
 
-        documentProxy = new DocumentProxy();
+        documentProxy = new DocumentProxy(renderQueue);
         documentProxy.setOwnerPassword(ownerPasswordField.getText());
 
         documentProxy.addDocumentConsumer(new DocumentProxy.DocumentConsumer() {
@@ -660,7 +763,7 @@ public class UI extends JSplitPane {
             }
         });
         pages.setDocument(documentProxy);
-        documentProxy.load(selectedFile.toPath());
+        documentProxy.load(selectedFile.toPath(), new MergeOptions());
     }
 
     protected void checkPassword() {
@@ -679,7 +782,7 @@ public class UI extends JSplitPane {
             imageChooser = new JFileChooser();
         }
         imageChooser.setFileFilter(imageFilter);
-        String lastDir = getPref(USER_PREF_LAST_IMAGE_DIR, null);
+        String lastDir = getPref(Preferences.USER_PREF_LAST_IMAGE_DIR, null);
         if (lastDir != null) {
             imageChooser.setCurrentDirectory(new File(lastDir));
         }
@@ -692,7 +795,7 @@ public class UI extends JSplitPane {
             pdfChooser = new JFileChooser();
             pdfChooser.setFileFilter(pdfFilter);
         }
-        String lastDir = getPref(USER_PREF_LAST_PDF_DIR, null);
+        String lastDir = getPref(Preferences.USER_PREF_LAST_PDF_DIR, null);
         if (lastDir != null) {
             Log.debug("Last PDF Directory '%s'", lastDir);
             pdfChooser.setCurrentDirectory(new File(lastDir));
@@ -708,7 +811,7 @@ public class UI extends JSplitPane {
             savePdfChooser.setMultiSelectionEnabled(false);
             savePdfChooser.setFileFilter(pdfFilter);
         }
-        String lastDir = getPref(USER_PREF_LAST_PDF_DIR, null);
+        String lastDir = getPref(Preferences.USER_PREF_LAST_PDF_DIR, null);
         if (lastDir != null) {
             Log.debug("Last PDF Directory '%s'", lastDir);
             savePdfChooser.setCurrentDirectory(new File(lastDir));
@@ -743,5 +846,4 @@ public class UI extends JSplitPane {
         pageImageViewer.setPage(page);
         imageExtractorDialog.setVisible(true);
     }
-
 }

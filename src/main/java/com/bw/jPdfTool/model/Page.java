@@ -12,8 +12,10 @@ public class Page {
     public int pageNb;
     public int pageCount;
 
+    public int dpi = 0;
     public double scale = 0;
     public BufferedImage image;
+    public String error;
 
     public Page(DocumentProxy document, int pageNb, int pageCount) {
         this.pageNb = pageNb;
@@ -53,8 +55,6 @@ public class Page {
     }
 
     public List<ImageResource> getImages() {
-        List<ImageResource> images = new ArrayList<>();
-        images.addAll(ImageExtractor.getImages(document.getLoadedDocument(), pageNb - 1));
-        return images;
+        return new ArrayList<>(ImageExtractor.getImages(document.getLoadedDocument(), pageNb - 1));
     }
 }

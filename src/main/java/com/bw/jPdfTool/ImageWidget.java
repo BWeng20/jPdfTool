@@ -16,6 +16,8 @@ public class ImageWidget extends JComponent {
     private BufferedImage image;
     private String imageName;
     private boolean selected = false;
+    private RenderingHints renderingHints = new RenderingHints(null);
+
 
     public void setAlternativeText(String alternativeText) {
         if (!Objects.equals(this.alternativeText, alternativeText)) {
@@ -33,6 +35,11 @@ public class ImageWidget extends JComponent {
             repaint();
         }
     }
+
+    public double getScale() {
+        return scale;
+    }
+
 
     public ImageWidget() {
         Color c = UIManager.getColor("Button.foreground");
@@ -109,6 +116,8 @@ public class ImageWidget extends JComponent {
             int imgWidth = image.getWidth();
             int imgHeight = image.getHeight();
 
+            g2d.setRenderingHints(renderingHints);
+
             int drawWidth = (int) (imgWidth * scale);
             int drawHeight = (int) (imgHeight * scale);
 
@@ -120,4 +129,7 @@ public class ImageWidget extends JComponent {
         }
     }
 
+    public void setRenderingHints(RenderingHints hints) {
+        renderingHints = hints;
+    }
 }

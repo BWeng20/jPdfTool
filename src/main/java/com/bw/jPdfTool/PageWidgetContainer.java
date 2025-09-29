@@ -30,6 +30,8 @@ public class PageWidgetContainer extends JComponent {
     private int space = 5;
     private boolean refreshing = false;
     private PageWidget selectedPage;
+    private final RenderingHints renderingHints = new RenderingHints(null);
+
     private final DocumentProxy.PageConsumer pageConsumer = page -> {
         PageWidget pw = getPageWidget(page.pageNb);
         if (pw != null) {
@@ -71,6 +73,27 @@ public class PageWidgetContainer extends JComponent {
                 refresh();
             }
         });
+
+        Preferences.getInstance().addPropertyChangeListener(
+                evt -> {
+                    Log.debug("PWC: changed " + evt.getPropertyName());
+                    updateRenderingHints();
+                    repaint();
+                },
+                Preferences.USER_PREF_VIEWER_ANTIALIASING,
+                Preferences.USER_PREF_VIEWER_RENDER_QUALITY,
+                Preferences.USER_PREF_VIEWER_INTERPOLATE_BI_CUBIC);
+        updateRenderingHints();
+    }
+
+    protected void updateRenderingHints() {
+        Preferences preferences = Preferences.getInstance();
+        renderingHints.put(RenderingHints.KEY_RENDERING, preferences.getBoolean(Preferences.USER_PREF_VIEWER_RENDER_QUALITY, true)
+                ? RenderingHints.VALUE_RENDER_QUALITY : RenderingHints.VALUE_RENDER_SPEED);
+        renderingHints.put(RenderingHints.KEY_ANTIALIASING, preferences.getBoolean(Preferences.USER_PREF_VIEWER_ANTIALIASING, true)
+                ? RenderingHints.VALUE_ANTIALIAS_ON : RenderingHints.VALUE_ANTIALIAS_OFF);
+        renderingHints.put(RenderingHints.KEY_INTERPOLATION, preferences.getBoolean(Preferences.USER_PREF_VIEWER_INTERPOLATE_BI_CUBIC, true)
+                ? RenderingHints.VALUE_INTERPOLATION_BICUBIC : RenderingHints.VALUE_INTERPOLATION_BILINEAR);
     }
 
     public int getSelectedPageIndex() {
@@ -143,6 +166,7 @@ public class PageWidgetContainer extends JComponent {
         if (cc < pageNb) {
             while (cc < pageNb) {
                 PageWidget widget = new PageWidget(++cc);
+                widget.setRenderingHints(renderingHints);
                 widget.addMouseListener(new MouseAdapter() {
 
                     final PageWidget w = widget;
@@ -245,4 +269,5 @@ public class PageWidgetContainer extends JComponent {
     public void setErrorText(String error) {
         // TODO
     }
+
 }

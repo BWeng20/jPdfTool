@@ -23,7 +23,7 @@ public class Main {
             JDialog.setDefaultLookAndFeelDecorated(true);
         }
 
-        String lafClassName = UI.getPref(UI.USER_PREF_LAF, UI.DEFAULT_LAF);
+        String lafClassName = UI.getPref(Preferences.USER_PREF_LAF, Preferences.DEFAULT_LAF);
         try {
             UIManager.setLookAndFeel(lafClassName);
         } catch (Exception e) {
@@ -32,23 +32,25 @@ public class Main {
 
         UI ui = new UI();
 
-        JFrame frame = new JFrame("PDF Passwords & Rights");
+        mainWindow = new JFrame("PDF Passwords & Rights");
 
         try {
             ShapeMultiResolutionImage icon = new ShapeMultiResolutionImage(
                     SVGConverter.convert(Main.class.getResourceAsStream("/icon.svg"))
             );
-            frame.setIconImage(icon);
+            mainWindow.setIconImage(icon);
         } catch (Exception ignored) {
         }
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        mainWindow.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
-        frame.setJMenuBar(ui.getMenu());
-        frame.setLocationByPlatform(true);
-        frame.setContentPane(ui);
-        frame.pack();
+        mainWindow.setJMenuBar(ui.getMenu());
+        mainWindow.setLocationByPlatform(true);
+        mainWindow.setContentPane(ui);
+        mainWindow.pack();
 
-        frame.setVisible(true);
+        mainWindow.setVisible(true);
     }
+
+    public static JFrame mainWindow;
 
 }

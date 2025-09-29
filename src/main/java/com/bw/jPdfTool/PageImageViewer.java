@@ -54,9 +54,7 @@ public final class PageImageViewer extends JPanel {
         buttons.add(combined);
         left.add(buttons, BorderLayout.SOUTH);
 
-        combined.addItemListener(e -> {
-            setShowCombined(combined.isSelected());
-        });
+        combined.addItemListener(e -> setShowCombined(combined.isSelected()));
 
         JSplitPane splitter = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
         splitter.setLeftComponent(left);
@@ -93,7 +91,7 @@ public final class PageImageViewer extends JPanel {
                 if (result == JFileChooser.APPROVE_OPTION) {
                     File selectedFolder = chooser.getSelectedFile();
                     if (selectedFolder.isDirectory()) {
-                        UI.prefs.put(UI.USER_PREF_LAST_IMAGE_DIR, selectedFolder.getAbsolutePath());
+                        Preferences.getInstance().set(Preferences.USER_PREF_LAST_IMAGE_DIR, selectedFolder.getAbsolutePath());
                         for (var v : imageMap.values()) {
                             saveImage(new File(selectedFolder, v.name + ".png").toString(), v.image);
                         }
@@ -126,7 +124,7 @@ public final class PageImageViewer extends JPanel {
                 if (result == JFileChooser.APPROVE_OPTION) {
                     File selectedFile = chooser.getSelectedFile().getAbsoluteFile();
                     if (!selectedFile.isDirectory()) {
-                        UI.prefs.put(UI.USER_PREF_LAST_IMAGE_DIR, selectedFile.getParent());
+                        Preferences.getInstance().set(Preferences.USER_PREF_LAST_IMAGE_DIR, selectedFile.getParent());
                         saveImage(selectedFile.toString(), i);
                     }
                 }
@@ -137,7 +135,7 @@ public final class PageImageViewer extends JPanel {
         });
     }
 
-    protected void saveImage(String name, BufferedImage image) throws IOException {
+    private void saveImage(String name, BufferedImage image) throws IOException {
 
         String ext;
         int extIndex = name.lastIndexOf(".");
@@ -158,7 +156,7 @@ public final class PageImageViewer extends JPanel {
     }
 
 
-    protected void setImages(List<Page.ImageResource> images) {
+    private void setImages(List<Page.ImageResource> images) {
         resourceList.removeAll();
         imageMap.clear();
         for (var image : images) {
@@ -178,7 +176,7 @@ public final class PageImageViewer extends JPanel {
      *
      * @param imageName The name. Can be null.
      */
-    protected void showImageByName(String imageName) {
+    private void showImageByName(String imageName) {
         if (imageName != null) {
             saveOne.setEnabled(true);
             image.setAlternativeText(imageName);
@@ -200,7 +198,7 @@ public final class PageImageViewer extends JPanel {
         showImage(null);
     }
 
-    protected void showImage(BufferedImage bimage) {
+    private void showImage(BufferedImage bimage) {
         if (bimage == null) {
             saveOne.setEnabled(false);
             image.setAlternativeText(imageMap.isEmpty() ? "No images" : "Select an image");
@@ -214,7 +212,7 @@ public final class PageImageViewer extends JPanel {
 
     }
 
-    protected void setShowCombined(boolean showCombined) {
+    private void setShowCombined(boolean showCombined) {
         if (showCombined != this.showCombined) {
             this.showCombined = showCombined;
             this.combined.setSelected(showCombined);

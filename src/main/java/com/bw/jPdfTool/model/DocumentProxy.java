@@ -1,16 +1,16 @@
 package com.bw.jPdfTool.model;
 
 import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.RenderQueue;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageTree;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
-import org.apache.pdfbox.rendering.PDFRenderer;
 
 import javax.swing.*;
-import java.awt.*;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -25,20 +25,22 @@ public class DocumentProxy {
 
     private final List<Page> pages = new ArrayList<>();
     private final List<Path> files = new ArrayList<>();
-    private final List<PageConsumer> pageConsumerList = new ArrayList<>();
     private final List<DocumentConsumer> docConsumerList = new ArrayList<>();
     private boolean closed = false;
     private String owerPassword4Load;
     private final JPasswordField passwordField = new JPasswordField();
     private PDDocument document;
+    private final RenderQueue renderQueue;
+    private final List<DocumentProxy.PageConsumer> pageConsumerList = new ArrayList<>();
+
 
     private final Deque<PdfLoadWorker> loadWorker = new ArrayDeque<>();
     private PdfLoadWorker currentLoader;
 
-    private PdfRenderWorker renderWorker;
     private String error;
 
-    public DocumentProxy() {
+    public DocumentProxy(RenderQueue renderQueue) {
+        this.renderQueue = renderQueue;
     }
 
     /**
@@ -46,21 +48,34 @@ public class DocumentProxy {
      *
      * @return The future with the document.
      */
-    public synchronized Future<PDDocument> load(Path file) {
+    public synchronized Future<PDDocument> load(Path file, MergeOptions mo) {
         ensuredNotClosed();
         synchronized (this) {
-            PdfLoadWorker lw = new PdfLoadWorker(file);
+            PdfLoadWorker lw = new PdfLoadWorker(file, mo);
             loadWorker.addLast(lw);
             startNextLoader();
             return lw;
         }
     }
 
+    /**
+     * Starts the next background loader task.
+     * Document for document and if all documents are loaded, renders all pages.<br>
+     * This is done parallel to the UI that shows the known pages.
+     */
     protected synchronized void startNextLoader() {
         if (currentLoader == null) {
             currentLoader = loadWorker.pollFirst();
             if (currentLoader != null)
                 currentLoader.execute();
+            else {
+                int pageCount = DocumentProxy.this.document.getNumberOfPages();
+                while (pages.size() < pageCount) {
+                    Page page = new Page(DocumentProxy.this, pages.size() + 1, pageCount);
+                    pages.add(page);
+                }
+                renderQueue.addDocument(this);
+            }
         }
     }
 
@@ -89,7 +104,7 @@ public class DocumentProxy {
     /**
      * Helper to request the owner password from user.
      */
-    protected void requestOwnerPassword(Path file) {
+    protected void requestOwnerPassword(Path file, MergeOptions mo) {
         SwingUtilities.invokeLater(() -> {
             Object[] message = {"Enter Owner Password:", passwordField};
             int option = JOptionPane.showConfirmDialog(
@@ -100,7 +115,7 @@ public class DocumentProxy {
             if (option == JOptionPane.OK_OPTION) {
                 owerPassword4Load = new String(passwordField.getPassword());
                 // retry
-                loadWorker.add(new PdfLoadWorker(file));
+                loadWorker.add(new PdfLoadWorker(file, mo));
                 startNextLoader();
             } else {
                 error = "File is protected.\nPassword needed.";
@@ -135,8 +150,11 @@ public class DocumentProxy {
         }
     }
 
-    protected void firePageRendered(Page page) {
-        if (closed)
+    /**
+     * Called by renderer if a page was finished.
+     */
+    public void firePageRendered(Page page) {
+        if (closed || page == null)
             return;
         List<PageConsumer> l;
         synchronized (pageConsumerList) {
@@ -187,11 +205,13 @@ public class DocumentProxy {
             } else
                 dc.failed(error);
         }
-        synchronized (pages) {
-            for (Page p : pages) {
-                if (p.image != null)
-                    firePageRendered(p);
-            }
+        List<Page> toFire;
+        synchronized (this) {
+            toFire = new ArrayList<>(pages);
+        }
+        for (Page p : toFire) {
+            if (p.image != null)
+                firePageRendered(p);
         }
     }
 
@@ -217,10 +237,6 @@ public class DocumentProxy {
             currentLoader = null;
             cl.cancel(true);
         }
-        if (renderWorker != null) {
-            renderWorker.cancel(true);
-            renderWorker = null;
-        }
     }
 
     /**
@@ -243,7 +259,7 @@ public class DocumentProxy {
         tree.remove(pageIndex);
         tree.insertAfter(pdPage, prevPage);
 
-        synchronized (pages) {
+        synchronized (this) {
             pages.clear();
             for (int i = 0; i < pageCount; ++i) {
                 Page page = new Page(DocumentProxy.this, i + 1, pageCount);
@@ -262,64 +278,65 @@ public class DocumentProxy {
     public int getPageRotation(int pageNb) {
         ensuredDocument();
 
-        int pageIndex = pageNb - 1;
-        PDPage pd = document.getPage(pageIndex);
-        return pd.getRotation();
+        if (document.getNumberOfPages() <= pageNb) {
+            int pageIndex = pageNb - 1;
+            PDPage pd = document.getPage(pageIndex);
+            return pd.getRotation();
+        } else
+            return 0;
     }
 
     public void rotatePage(int pageNb, int degree) {
         ensuredDocument();
 
-        int pageIndex = pageNb - 1;
+        if (document.getNumberOfPages() >= pageNb) {
+            int pageIndex = pageNb - 1;
 
-        if (renderWorker != null) {
-            renderWorker.cancel(true);
-            renderWorker = null;
+            Page p = pages.get(pageIndex);
+            p.image = null;
+            p.scale = 0;
+            PDPage pd = document.getPage(pageIndex);
+            pd.setRotation(pd.getRotation() + degree);
+            refirePages();
         }
-        Page p = pages.get(pageIndex);
-        p.image = null;
-        p.scale = 0;
-        PDPage pd = document.getPage(pageIndex);
-        pd.setRotation(pd.getRotation() + degree);
-        refirePages();
     }
 
     public void deletePage(int pageNb) {
         ensuredDocument();
 
-        int pageIndex = pageNb - 1;
+        if (document.getNumberOfPages() >= pageNb) {
 
-        if (renderWorker != null) {
-            renderWorker.cancel(true);
-            renderWorker = null;
-        }
+            int pageIndex = pageNb - 1;
 
-        // 0-based index!
-        document.removePage(pageIndex);
-        pages.remove(pageIndex);
-        int pageCount = pages.size();
-        for (int i = 0; i < pageCount; ++i) {
-            Page p = pages.get(i);
-            p.pageNb = i + 1;
-            p.pageCount = pageCount;
+            // 0-based index!
+            document.removePage(pageIndex);
+            pages.remove(pageIndex);
+            int pageCount = pages.size();
+            for (int i = 0; i < pageCount; ++i) {
+                Page p = pages.get(i);
+                p.pageNb = i + 1;
+                p.pageCount = pageCount;
+            }
+            refirePages();
         }
-        refirePages();
     }
 
     private void refirePages() {
         fireDocumentLoaded(null);
         boolean imageMissing = false;
-        for (Page p : pages) {
-            if (p.image == null)
+        List<Page> pagesToFire;
+        synchronized (this) {
+            pagesToFire = new ArrayList<>(pages);
+        }
+        for (Page p : pagesToFire) {
+            if (p.image == null) {
                 imageMissing = true;
-            else
+            } else
                 firePageRendered(p);
         }
         if (imageMissing) {
-            renderWorker = new PdfRenderWorker();
-            renderWorker.execute();
+            renderQueue.addDocument(this);
         }
-
     }
 
     protected void ensuredNotClosed() {
@@ -333,10 +350,14 @@ public class DocumentProxy {
             throw new IllegalStateException("No Document loaded");
     }
 
-    public PDPage getPDPage(int pageNb) {
+    public synchronized Page getPage(int pageNb) {
         ensuredDocument();
-        return document.getPage(pageNb - 1);
+        if (pageNb <= pages.size())
+            return pages.get(pageNb - 1);
+        else
+            return null;
     }
+
 
     public void setOwnerPassword(String ownerPassword) {
         if (ownerPassword != null) {
@@ -347,6 +368,26 @@ public class DocumentProxy {
             owerPassword4Load = null;
         }
     }
+
+    public boolean isClosed() {
+        return closed;
+    }
+
+    public int getPageCount() {
+        return pages.size();
+    }
+
+    public synchronized boolean needsRendering() {
+        // Closed documents don't have pages to render!
+        if (!closed) {
+            for (Page p : pages) {
+                if (p.image == null && p.error == null)
+                    return true;
+            }
+        }
+        return false;
+    }
+
 
     /**
      * Interface to notify about rendered pages.
@@ -374,9 +415,11 @@ public class DocumentProxy {
 
         protected boolean passwordNeeded = false;
         protected final Path file;
+        protected final MergeOptions mo;
 
-        public PdfLoadWorker(Path file) {
+        public PdfLoadWorker(Path file, MergeOptions mo) {
             this.file = file;
+            this.mo = mo;
         }
 
         @Override
@@ -399,91 +442,89 @@ public class DocumentProxy {
 
         @Override
         protected void done() {
-            synchronized (DocumentProxy.this) {
-                try {
+            try {
+                boolean fireLoaded = false;
+                synchronized (DocumentProxy.this) {
                     Log.debug("DONE (%s)", file);
                     currentLoader = null;
                     PDDocument document = get();
                     if (!DocumentProxy.this.closed) {
                         if (passwordNeeded) {
-                            requestOwnerPassword(file);
+                            requestOwnerPassword(file, mo);
                         } else {
                             if (document != null) {
+                                int oldPageCount = -1;
+                                int pageCount;
                                 if (DocumentProxy.this.document == null) {
                                     DocumentProxy.this.document = document;
                                     pages.clear();
+                                    pageCount = DocumentProxy.this.document.getNumberOfPages();
                                 } else {
                                     // Append pages
-                                    PDFMergerUtility pdfMergerUtility = new PDFMergerUtility();
-                                    pdfMergerUtility.appendDocument(DocumentProxy.this.document, document);
-                                    document.close();
-                                }
-                                int pageCount = DocumentProxy.this.document.getNumberOfPages();
-                                synchronized (pages) {
-                                    while (pages.size() < pageCount) {
-                                        Page page = new Page(DocumentProxy.this, pages.size() + 1, pageCount);
-                                        pages.add(page);
+                                    try {
+                                        oldPageCount = DocumentProxy.this.document.getNumberOfPages();
+                                        PDFMergerUtility pdfMergerUtility = new PDFMergerUtility();
+                                        pdfMergerUtility.appendDocument(DocumentProxy.this.document, document);
+                                    } catch (Exception e) {
+                                        Log.error("Failed to merge. %s", e.getMessage());
+                                        oldPageCount = -1;
+                                    } finally {
+                                        IOUtils.closeQuietly(document);
                                     }
+                                    pageCount = pages.size() + document.getNumberOfPages();
                                 }
-                                fireDocumentLoaded(file);
-                                Log.debug("Start renderer (%s)", file);
+                                // zipper merge if requested
+                                if (mo.startPageNb > 0 && mo.startPageNb < oldPageCount) {
+                                    int targetPageIndex = mo.startPageNb - 1;
+                                    int segmentCount = 0;
+                                    int pageToMoveIndex = oldPageCount;
+                                    PDPageTree tree = DocumentProxy.this.document.getDocumentCatalog().getPages();
 
-                                PdfRenderWorker render = new PdfRenderWorker();
-                                render.execute();
+                                    while (pageToMoveIndex < pageCount) {
+
+                                        PDPage pdPage = tree.get(pageToMoveIndex);
+                                        if (targetPageIndex > 0) {
+                                            PDPage prevPage = tree.get(targetPageIndex - 1);
+                                            tree.remove(pageToMoveIndex);
+                                            tree.insertAfter(pdPage, prevPage);
+                                        } else {
+                                            PDPage nextPage = tree.get(targetPageIndex);
+                                            tree.remove(pageToMoveIndex);
+                                            tree.insertBefore(pdPage, nextPage);
+                                        }
+
+                                        ++pageToMoveIndex;
+                                        ++segmentCount;
+
+                                        if (segmentCount >= mo.segmentLength && mo.gapLength > 0) {
+                                            targetPageIndex += mo.gapLength;
+                                        }
+                                        ++targetPageIndex;
+
+                                    }
+                                    pages.clear();
+                                }
+
+                                while (pages.size() < pageCount) {
+                                    Page page = new Page(DocumentProxy.this, pages.size() + 1, pageCount);
+                                    pages.add(page);
+                                }
+
+                                // Tell anyone, that a new document is loaded.
+                                fireLoaded = true;
                             }
                         }
                     }
-                } catch (Exception e) {
-                    error = e.getMessage();
-                    fireDocumentLoaded(null);
                 }
-                startNextLoader();
-            }
-        }
-    }
-
-    protected class PdfRenderWorker extends SwingWorker<Void, Page> {
-
-        @Override
-        protected void done() {
-        }
-
-        @Override
-        protected Void doInBackground() {
-            try {
-                PDFRenderer renderer = new PDFRenderer(document);
-
-                RenderingHints renderingHints = new RenderingHints(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                renderer.setRenderingHints(renderingHints);
-
-                int pageCount = pages.size();
-                for (int i = 0; i < pageCount; i++) {
-                    if (closed)
-                        break;
-                    Page page;
-                    synchronized (pages) {
-                        page = pages.get(i);
-                    }
-                    if (page.image == null) {
-                        Log.debug("Render page #%d", i);
-                        page.image = renderer.renderImageWithDPI(i, 300);
-                        publish(page);
-                    }
-                }
-                Log.debug("Render finished");
-                error = null;
-            } catch (InvalidPasswordException ep) {
-                error = "File is encrypted and owner password\ndoesn't match";
+                if (fireLoaded)
+                    fireDocumentLoaded(file);
             } catch (Exception e) {
                 error = e.getMessage();
+                fireDocumentLoaded(null);
             }
-            return null;
-        }
-
-        @Override
-        protected void process(java.util.List<Page> pages) {
-            for (Page p : pages)
-                firePageRendered(p);
+            startNextLoader();
         }
     }
+
+
 }
