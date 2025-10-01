@@ -247,26 +247,41 @@ public class DocumentProxy {
      */
     public void movePage(int pageNb, int offset) {
         ensuredDocument();
-        int pageCount = pages.size();
+        final int pageCount = pages.size();
         if (pageNb < 0 || pageNb > pageCount) {
             throw new IllegalArgumentException("Page " + pageNb + " is out of range");
         }
 
         PDPageTree tree = document.getDocumentCatalog().getPages();
-        int pageIndex = pageNb - 1;
-        PDPage pdPage = tree.get(pageIndex);
-        PDPage prevPage = tree.get(pageIndex + offset);
-        tree.remove(pageIndex);
-        tree.insertAfter(pdPage, prevPage);
+        final int pageIndex = pageNb - 1;
+        final int targetPrevPageIndex = (offset < 0) ? (pageIndex + offset - 1) : (pageIndex + offset);
 
-        synchronized (this) {
-            pages.clear();
-            for (int i = 0; i < pageCount; ++i) {
-                Page page = new Page(DocumentProxy.this, i + 1, pageCount);
-                pages.add(page);
+        if (targetPrevPageIndex != pageIndex) {
+            if (targetPrevPageIndex >= 0) {
+                if (targetPrevPageIndex < pageCount) {
+                    PDPage pdPage = tree.get(pageIndex);
+                    PDPage prevPage = tree.get(targetPrevPageIndex);
+                    tree.remove(pageIndex);
+                    tree.insertAfter(pdPage, prevPage);
+                } else
+                    return;
+            } else if (pageIndex > 0) {
+                PDPage pdPage = tree.get(pageIndex);
+                PDPage nextPage = tree.get(0);
+                tree.remove(pageIndex);
+                tree.insertBefore(pdPage, nextPage);
+            } else
+                return;
+
+            synchronized (this) {
+                pages.clear();
+                for (int i = 0; i < pageCount; ++i) {
+                    Page page = new Page(DocumentProxy.this, i + 1, pageCount);
+                    pages.add(page);
+                }
             }
+            refirePages();
         }
-        refirePages();
     }
 
     /**
@@ -278,7 +293,7 @@ public class DocumentProxy {
     public int getPageRotation(int pageNb) {
         ensuredDocument();
 
-        if (document.getNumberOfPages() <= pageNb) {
+        if (document.getNumberOfPages() >= pageNb) {
             int pageIndex = pageNb - 1;
             PDPage pd = document.getPage(pageIndex);
             return pd.getRotation();

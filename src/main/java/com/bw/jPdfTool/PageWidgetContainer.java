@@ -132,6 +132,19 @@ public class PageWidgetContainer extends JComponent {
                     // Delay event until page is loaded
                     fireSelectionEvent(-1);
                 }
+                SwingUtilities.invokeLater(() -> {
+                    var currentSelectedPage = getSelectedPage();
+                    if (currentSelectedPage != null) {
+                        var bounds = currentSelectedPage.getBounds();
+                        // Check if the page has already some content.
+                        // (to prevent us from "jumping" during initialisation)
+                        if (!bounds.isEmpty()) {
+                            // Show the selected page. Some Viewport-parent will handle this.
+                            currentSelectedPage.scrollRectToVisible(
+                                    new Rectangle(0, 0, currentSelectedPage.getWidth(), currentSelectedPage.getHeight()));
+                        }
+                    }
+                });
             } else {
                 fireSelectionEvent(-1);
             }

@@ -6,6 +6,7 @@ import com.bw.jPdfTool.model.Page;
 import com.bw.jtools.svg.SVGConverter;
 import com.bw.jtools.ui.ShapeIcon;
 import com.formdev.flatlaf.FlatLaf;
+import org.apache.pdfbox.multipdf.Splitter;
 import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
@@ -26,13 +27,12 @@ import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.UUID;
+import java.util.*;
+import java.util.List;
 
 /**
  * Main panel to show the pdf tool. Wrap this panel into a frame to create an app.
@@ -40,25 +40,41 @@ import java.util.UUID;
  */
 public class UI extends JSplitPane {
 
-
     private static final Map<String, Icon> icons = new HashMap<>();
+
     protected static JFileChooser savePdfChooser;
     protected static JFileChooser pdfChooser;
     protected static JFileChooser imageChooser;
+
     protected static FileNameExtensionFilter pdfFilter = new FileNameExtensionFilter("PDF-Files (*.pdf)", "pdf");
     protected static FileNameExtensionFilter imageFilter = new FileNameExtensionFilter("Picture (*.jpg, *.png)", "jpeg", "jpg", "png");
 
     private final JTextField ownerPasswordField = new JTextField();
     private final JTextField userPasswordField = new JTextField();
-    private final JCheckBox allowPrinting = new JCheckBox("Printing");
-    private final JCheckBox allowExtraction = new JCheckBox("Extraction");
+
     private final DefaultListModel<String> filePathsModel = new DefaultListModel<>();
     private final JList<String> filePaths = new JList<>(filePathsModel);
     private final JButton saveButton = new JButton("Write To File");
+    private final JCheckBox compression = new JCheckBox("Compression");
+
+    private final PageWidgetContainer pages = new PageWidgetContainer();
+    protected DocumentProxy documentProxy;
+    private PageWidget selectedPage;
+
+    /////////////////////////////////////////////
+    // Permissions
+    /// //////////////////////////////////////////
+
+    private final JCheckBox allowPrinting = new JCheckBox("Printing");
+    private final JCheckBox allowExtraction = new JCheckBox("Extraction");
     private final JCheckBox allowModification = new JCheckBox("Modify");
     private final JCheckBox allowFillIn = new JCheckBox("Fill Form");
     private final JCheckBox allowAssembly = new JCheckBox("Assembly");
-    private final JCheckBox compression = new JCheckBox("Compression");
+
+    /////////////////////////////////////////////
+    // Page manipulation
+    /// //////////////////////////////////////////
+
     private final JButton deleteButton;
     private final JButton rotateClockwiseButton;
     private final JButton moveLeft;
@@ -67,9 +83,12 @@ public class UI extends JSplitPane {
     private final JTextField rotation = new JTextField();
     private final JLabel pageNb = new JLabel();
     private final JLabel quality = new JLabel();
-    private final PageWidgetContainer pages = new PageWidgetContainer();
-    protected DocumentProxy documentProxy;
-    private PageWidget selectedPage;
+
+    /////////////////////////////////////////////
+    // Splitting
+    /// //////////////////////////////////////////
+    private final JSpinner pagesPerDocument = new JSpinner(new SpinnerNumberModel(1, 1, 100, 1));
+    private final JButton splitDocument = new JButton("Split Document");
 
     protected final RenderQueue renderQueue = new RenderQueue();
 
@@ -109,10 +128,11 @@ public class UI extends JSplitPane {
         compression.setSelected(true);
         allowPrinting.setSelected(true);
         saveButton.setEnabled(false);
+        splitDocument.setEnabled(false);
         rotation.setEditable(false);
 
-        JButton browseButton = new JButton("...");
-        JButton browseAppendButton = new JButton("+");
+        JButton browseButton = new JButton("Open");
+        JButton browseAppendButton = new JButton("Merge");
 
         JLabel filePathLabel = new JLabel("Loaded files");
 
@@ -173,7 +193,7 @@ public class UI extends JSplitPane {
         gc.gridy++;
         panel.add(userPasswordField, gc);
 
-        JPanel permissions = new JPanel(new GridLayout(3,2));
+        JPanel permissions = new JPanel(new GridLayout(3, 2));
 
         gc.weightx = 0;
         gc.gridy++;
@@ -213,49 +233,16 @@ public class UI extends JSplitPane {
             }
         });
 
-        JPanel pageManipulation = new JPanel(new GridBagLayout());
+        JPanel manipulations = new JPanel(new GridBagLayout());
         GridBagConstraints pmGc = new GridBagConstraints();
         pmGc.anchor = GridBagConstraints.NORTHWEST;
-        pmGc.insets = new Insets(0, 5, 5, 5);
         pmGc.gridx = 0;
         pmGc.gridy = 0;
-        pmGc.gridwidth = 2;
-        pmGc.weightx = 0;
-        pageManipulation.add(pageNb, pmGc);
-        pmGc.gridwidth = 1;
-        pmGc.gridy++;
-        JLabel rotationLabel = new JLabel("Rotation");
-        rotationLabel.setLabelFor(rotation);
-        pageManipulation.add(rotationLabel, pmGc);
-        pmGc.gridx = 1;
-        pageManipulation.add(rotation, pmGc);
-
-        pmGc.gridy++;
-        pmGc.gridx = 0;
-        pmGc.gridwidth = 2;
-        pageManipulation.add(quality, pmGc);
-
-        pmGc.gridwidth = 1;
-        pmGc.gridx = 2;
-        pmGc.gridy = 0;
-        pmGc.fill = GridBagConstraints.NONE;
-        pageManipulation.add(deleteButton, pmGc);
-        pmGc.gridy++;
-        pageManipulation.add(rotateClockwiseButton, pmGc);
-        pmGc.gridy++;
-        pageManipulation.add(moveLeft, pmGc);
+        pmGc.weightx = 0.5;
+        pmGc.fill = GridBagConstraints.BOTH;
+        manipulations.add(createPageManipulationPanel(), pmGc);
         pmGc.gridx++;
-        pageManipulation.add(moveRight, pmGc);
-
-        pmGc.gridx++;
-        pmGc.gridy = 0;
-        pageManipulation.add(images, pmGc);
-
-        pmGc.gridy++;
-        pmGc.weightx = 1;
-        pageManipulation.add(Box.createHorizontalGlue(), pmGc);
-
-        pageManipulation.setBorder(BorderFactory.createTitledBorder("Page Manipulation"));
+        manipulations.add(createSplitterPanel(), pmGc);
 
         gcLabel.gridy++;
         gc.fill = GridBagConstraints.HORIZONTAL;
@@ -265,7 +252,8 @@ public class UI extends JSplitPane {
         gc.gridwidth = 3;
         gc.gridx = 0;
         gc.gridy++;
-        panel.add(pageManipulation, gc);
+        panel.add(manipulations, gc);
+
 
         gcLabel.gridy++;
         gc.gridy++;
@@ -329,6 +317,7 @@ public class UI extends JSplitPane {
         });
 
         saveButton.addActionListener(e -> doSave());
+        splitDocument.addActionListener(e -> doSplit());
 
         setLeftComponent(panel);
         JScrollPane scrollPane = new JScrollPane(pages);
@@ -349,6 +338,87 @@ public class UI extends JSplitPane {
         });
 
         renderQueue.start();
+    }
+
+    protected JPanel createSplitterPanel() {
+        JPanel splitter = new JPanel(new GridBagLayout());
+        GridBagConstraints gc = new GridBagConstraints();
+        gc.anchor = GridBagConstraints.NORTHWEST;
+        gc.insets = new Insets(0, 5, 5, 5);
+        gc.gridx = 0;
+        gc.gridy = 0;
+        gc.gridwidth = 1;
+        gc.weightx = 0;
+        gc.weighty = 0;
+
+        JLabel pagesLabel = new JLabel("Number of Pages");
+        pagesLabel.setLabelFor(pagesPerDocument);
+        splitter.add(pagesLabel, gc);
+        gc.gridx++;
+        splitter.add(pagesPerDocument, gc);
+
+        gc.fill = GridBagConstraints.BOTH;
+        gc.weightx = 1;
+        gc.gridx = 0;
+        gc.gridy++;
+        gc.gridwidth = 2;
+        splitter.add(Box.createGlue(), gc);
+
+        gc.fill = GridBagConstraints.NONE;
+        gc.weightx = 0;
+        gc.gridy++;
+        splitter.add(splitDocument, gc);
+
+
+        splitter.setBorder(BorderFactory.createTitledBorder("Splitting"));
+        return splitter;
+
+    }
+
+    protected JPanel createPageManipulationPanel() {
+        JPanel pageManipulation = new JPanel(new GridBagLayout());
+        GridBagConstraints gc = new GridBagConstraints();
+        gc.anchor = GridBagConstraints.NORTHWEST;
+        gc.insets = new Insets(0, 5, 5, 5);
+        gc.gridx = 0;
+        gc.gridy = 0;
+        gc.gridwidth = 2;
+        gc.weightx = 0;
+        pageManipulation.add(pageNb, gc);
+        gc.gridwidth = 1;
+        gc.gridy++;
+        JLabel rotationLabel = new JLabel("Rotation");
+        rotationLabel.setLabelFor(rotation);
+        pageManipulation.add(rotationLabel, gc);
+        gc.gridx = 1;
+        pageManipulation.add(rotation, gc);
+
+        gc.gridy++;
+        gc.gridx = 0;
+        gc.gridwidth = 2;
+        pageManipulation.add(quality, gc);
+
+        gc.gridwidth = 1;
+        gc.gridx = 2;
+        gc.gridy = 0;
+        gc.fill = GridBagConstraints.NONE;
+        pageManipulation.add(deleteButton, gc);
+        gc.gridy++;
+        pageManipulation.add(rotateClockwiseButton, gc);
+        gc.gridy++;
+        pageManipulation.add(moveLeft, gc);
+        gc.gridx++;
+        pageManipulation.add(moveRight, gc);
+
+        gc.gridx++;
+        gc.gridy = 0;
+        pageManipulation.add(images, gc);
+
+        gc.gridy++;
+        gc.weightx = 0.1;
+        pageManipulation.add(Box.createHorizontalGlue(), gc);
+        pageManipulation.setBorder(BorderFactory.createTitledBorder("Page Manipulation"));
+        return pageManipulation;
     }
 
     private final JRadioButtonMenuItem lafLight = new JRadioButtonMenuItem("Light");
@@ -543,7 +613,12 @@ public class UI extends JSplitPane {
     protected void doMoveRight() {
         PageWidget pw = pages.getSelectedPage();
         if (pw != null) {
+            int pageCount = documentProxy.getPageCount();
+            int pageNb = pw.getPageNumber() + 1;
+            if (pageNb > pageCount)
+                pageNb = pageCount;
             pw.getPage().movePage(1);
+            pages.setSelectedPage(pages.getPageWidget(pageNb));
         }
     }
 
@@ -553,7 +628,11 @@ public class UI extends JSplitPane {
     protected void doMoveLeft() {
         PageWidget pw = pages.getSelectedPage();
         if (pw != null) {
+            int pageNb = pw.getPageNumber() - 1;
+            if (pageNb <= 0)
+                pageNb = 1;
             pw.getPage().movePage(-1);
+            pages.setSelectedPage(pages.getPageWidget(pageNb));
         }
     }
 
@@ -576,6 +655,56 @@ public class UI extends JSplitPane {
         if (pw != null) {
             Page page = pw.getPage();
             page.document.deletePage(page.pageNb);
+        }
+    }
+
+    /**
+     * Requests a file template and creates multiple documents.
+     */
+    protected void doSplit() {
+        if (pagesPerDocument.getValue() instanceof Number number) {
+            int pagePerDocument = number.intValue();
+            if (pagePerDocument > 0 && documentProxy != null) {
+                JFileChooser chooser = getSavePdfChooser();
+                chooser.setMultiSelectionEnabled(false);
+                chooser.setDialogTitle("Choose a base file name for split…");
+                JLabel info = new JLabel("<html>Choose a base file name,<br>the index of the file will be put<br><b>behind</b> the name</html>");
+                info.setVerticalAlignment(JLabel.TOP);
+                chooser.setAccessory(info);
+                int result = chooser.showSaveDialog(this);
+                if (result == JFileChooser.APPROVE_OPTION) {
+                    File selectedFile = chooser.getSelectedFile();
+
+                    String fprefix;
+                    String fpostfix;
+                    String fname = selectedFile.getName();
+                    int idx = fname.lastIndexOf('.');
+                    if (idx < 0) {
+                        fprefix = selectedFile.getAbsolutePath();
+                        fpostfix = ".pdf";
+                    } else {
+                        fprefix = new File(selectedFile.getParent(), fname.substring(0, idx)).getAbsolutePath();
+                        fpostfix = fname.substring(idx);
+                    }
+
+                    int fileCount = 0;
+                    final PDDocument source = documentProxy.getLoadedDocument();
+                    Splitter splitter = new Splitter();
+                    splitter.setSplitAtPage(pagePerDocument);
+                    try {
+                        List<PDDocument> splittedDocs = splitter.split(source);
+                        for (PDDocument doc : splittedDocs) {
+                            String docFile = String.format("%s%03d%s", fprefix, ++fileCount, fpostfix);
+                            doc.save(docFile);
+                            Log.info("Stored file '%s'", docFile);
+                            doc.close();
+                        }
+                    } catch (IOException e) {
+                        JOptionPane.showMessageDialog(this, e.getMessage(),
+                                "PDF Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            }
         }
     }
 
@@ -744,6 +873,7 @@ public class UI extends JSplitPane {
             @Override
             public void documentLoaded(PDDocument document, Path file) {
                 saveButton.setEnabled(document != null);
+                splitDocument.setEnabled(document != null);
                 if (file != null)
                     filePathsModel.addElement(file.toString());
             }
@@ -751,6 +881,7 @@ public class UI extends JSplitPane {
             @Override
             public void failed(String error) {
                 saveButton.setEnabled(false);
+                splitDocument.setEnabled(false);
                 filePathsModel.addElement(error);
                 documentProxy = null;
             }
@@ -786,8 +917,8 @@ public class UI extends JSplitPane {
     public static JFileChooser getPdfChooser() {
         if (pdfChooser == null) {
             pdfChooser = new JFileChooser();
-            pdfChooser.setFileFilter(pdfFilter);
         }
+        pdfChooser.setFileFilter(pdfFilter);
         String lastDir = getPref(Preferences.USER_PREF_LAST_PDF_DIR, null);
         if (lastDir != null) {
             Log.debug("Last PDF Directory '%s'", lastDir);
@@ -799,17 +930,17 @@ public class UI extends JSplitPane {
     public static JFileChooser getSavePdfChooser() {
         if (savePdfChooser == null) {
             savePdfChooser = new JFileChooser();
-            savePdfChooser.setDialogTitle("Select PDF to Save...");
-            savePdfChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
-            savePdfChooser.setMultiSelectionEnabled(false);
-            savePdfChooser.setFileFilter(pdfFilter);
         }
         String lastDir = getPref(Preferences.USER_PREF_LAST_PDF_DIR, null);
         if (lastDir != null) {
             Log.debug("Last PDF Directory '%s'", lastDir);
             savePdfChooser.setCurrentDirectory(new File(lastDir));
         }
-
+        savePdfChooser.setDialogTitle("Select PDF to Save…");
+        savePdfChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        savePdfChooser.setMultiSelectionEnabled(false);
+        savePdfChooser.setFileFilter(pdfFilter);
+        savePdfChooser.setAccessory(null);
         return savePdfChooser;
     }
 
