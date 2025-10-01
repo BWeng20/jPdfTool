@@ -33,67 +33,108 @@ public final class MergeOptionIcon implements Icon {
 
         if (options != null) {
 
-            int y2 = y + pageHeight + gap;
+            int yMerged = y + pageHeight + gap;
 
             int pw = pageWidth + gap;
             Color color = c.getForeground();
-            Color color2 = UIManager.getColor("List.selectionForeground");
-            Color color2Bk = UIManager.getColor("List.selectionBackground");
+            Color colorMerged = UIManager.getColor("List.selectionForeground");
+            Color colorMergedBk = UIManager.getColor("List.selectionBackground");
 
-            int pgNb = 1;
+            FontMetrics fm = g2.getFontMetrics();
+            int textY = fm.getAscent() + (pageHeight - fm.getHeight()) / 2;
+
+            int ellipseW = fm.stringWidth("…");
+
+            int[] pgNbs = new int[]{1, 1};
+            int[] xpos = new int[]{x, x};
+
+            Runnable drawOrgPage = () -> {
+                g2.setPaint(color);
+                g2.drawRect(xpos[0], y, pageWidth, pageHeight);
+                String txt = Integer.toString(pgNbs[0]++);
+                g2.drawString(txt, xpos[0] + (pageWidth - fm.stringWidth(txt)) / 2, y + textY);
+                xpos[0] += pw;
+            };
+
+            Runnable drawMergePage = () -> {
+                g2.setPaint(colorMergedBk);
+                g2.fillRect(xpos[1], yMerged, pageWidth, pageHeight);
+                g2.setPaint(colorMerged);
+                String txt = Integer.toString(pgNbs[1]++);
+                g2.drawString(txt, xpos[1] + (pageWidth - fm.stringWidth(txt)) / 2, yMerged + textY);
+                xpos[1] += pw;
+            };
+
             // Draw prefix (original pages before first inserted page, possibly empty)
             if (options.startPageNb > 1) {
-                drawPage(g2, x, y, color, null, "1");
-                x += pw;
+                drawOrgPage.run();
                 if (options.startPageNb > 2) {
-                    drawPage(g2, x, y, color, null, String.format(options.startPageNb > 3 ? "…%d" : "%d", options.startPageNb - 1));
-                    pgNb = options.startPageNb;
-                    x += pw;
-                } else
-                    ++pgNb;
-            }
-            if (options.segmentLength > 0) {
-                // Draw inserted segment (1 to n)
-                drawPage(g2, x, y2, color2, color2Bk, String.format("%d", pgNb));
-                x += pw;
-                if (options.segmentLength > 1) {
-                    pgNb += options.segmentLength - 1;
-                    drawPage(g2, x, y2, color2, color2Bk, String.format(options.segmentLength > 2 ? "…%d" : "%d", pgNb++));
-                    x += pw;
-                } else
-                    pgNb++;
-            }
-
-            if (options.gapLength > 0) {
-                // Draw gab before next segment (1 to n)
-                drawPage(g2, x, y, color, null, String.format("%d", pgNb++));
-                x += pw;
-                if (options.gapLength > 1) {
-                    pgNb += options.gapLength - 1;
-                    drawPage(g2, x, y, color, null, String.format(options.gapLength > 2 ? "…%d" : "%d", pgNb++));
-                    x += pw;
+                    if (options.startPageNb > 3) {
+                        g2.drawString("…", xpos[0], y + textY);
+                        xpos[0] += ellipseW;
+                    }
+                    pgNbs[0] = options.startPageNb;
+                    if (options.segmentLength > 0)
+                        pgNbs[0]--;
+                    drawOrgPage.run();
                 }
+                xpos[1] = xpos[0] - pw / 2 + gap;
+            } else {
+                xpos[0] += pw / 2;
             }
+            // Draw sequence of inserted and original pages if mixing is enabled.
+            if (options.segmentLength > 0) {
+                while (xpos[0] < w || xpos[1] < w) {
 
-            // Draw start of next inserted segment
-            drawPage(g2, x, y2, color2, color2Bk, String.format("%d…", pgNb));
+                    // Draw inserted segment (1 to n)
+                    drawMergePage.run();
+                    if (options.segmentLength > 1) {
+                        if (options.segmentLength > 2) {
+                            g2.setPaint(colorMergedBk);
+                            g2.drawString("…", xpos[1], yMerged + textY);
+                            xpos[0] += ellipseW;
+                            xpos[1] += ellipseW;
+                            pgNbs[1] += options.segmentLength - 2;
+                        }
+                        drawMergePage.run();
+                        xpos[0] += pw;
+                    }
 
+                    if (options.gapLength > 0) {
+                        xpos[0] += gap;
+                        xpos[1] += gap;
+                        // Draw gab before next segment (1 to n)
+                        drawOrgPage.run();
+                        if (options.gapLength > 1) {
+                            if (options.gapLength > 2) {
+                                g2.drawString("…", xpos[0], y + textY);
+                                xpos[0] += ellipseW;
+                                xpos[1] += ellipseW;
+                                pgNbs[0] += options.gapLength - 2;
+                            }
+                            drawOrgPage.run();
+                            xpos[1] += pw;
+                        }
+                    } else {
+                        // Should not happen.
+                        // Abort to prevent endless loop.
+                        break;
+                    }
+                }
+            } else if (options.segmentLength < 0) {
+                // Simple append. Draw some "1..n" at the end.
+                drawMergePage.run();
+                g2.setPaint(colorMergedBk);
+                g2.drawString("…", xpos[1], yMerged + textY);
+                xpos[1] += ellipseW;
+                g2.setPaint(colorMergedBk);
+                g2.fillRect(xpos[1], yMerged, pageWidth, pageHeight);
+                g2.setPaint(colorMerged);
+                g2.drawString("∞", xpos[1] + (pageWidth - fm.stringWidth("∞")) / 2, yMerged + textY);
+            }
         }
     }
 
-    private void drawPage(Graphics2D g2, int x, int y, Color fg, Color bk, String txt) {
-        FontMetrics fm = g2.getFontMetrics();
-        int textY = y + fm.getAscent() + (pageHeight - fm.getHeight()) / 2;
-        if (bk != null) {
-            g2.setPaint(bk);
-            g2.fillRect(x, y, pageWidth, pageHeight);
-            g2.setPaint(fg);
-        } else {
-            g2.setPaint(fg);
-            g2.drawRect(x, y, pageWidth, pageHeight);
-        }
-        g2.drawString(txt, x + (pageWidth - fm.stringWidth(txt)) / 2, textY);
-    }
 
     public void setMergeOptions(MergeOptions options) {
         this.options = options;
