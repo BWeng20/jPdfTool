@@ -7,12 +7,12 @@ public final class Log {
 
     public static void info(String format, Object... arguments) {
         if (INFO)
-            System.out.printf((format) + "%n", arguments);
+            System.out.printf("[INFO] "+format + "%n", arguments);
     }
 
     public static void debug(String format, Object... arguments) {
         if (DEBUG)
-            System.out.printf((format) + "%n", arguments);
+            System.out.printf("[DEBUG] "+format + "%n", arguments);
     }
 
     public static void error(String format, Object... arguments) {
