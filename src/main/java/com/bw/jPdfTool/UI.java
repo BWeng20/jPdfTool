@@ -173,24 +173,18 @@ public class UI extends JSplitPane {
         gc.gridy++;
         panel.add(userPasswordField, gc);
 
+        JPanel permissions = new JPanel(new GridLayout(3,2));
+
+        gc.weightx = 0;
         gc.gridy++;
-        gcLabel.gridy++;
-        panel.add(compression, gc);
-        gc.gridy++;
-        gcLabel.gridy++;
-        panel.add(allowPrinting, gc);
-        gc.gridy++;
-        gcLabel.gridy++;
-        panel.add(allowModification, gc);
-        gc.gridy++;
-        gcLabel.gridy++;
-        panel.add(allowExtraction, gc);
-        gc.gridy++;
-        gcLabel.gridy++;
-        panel.add(allowFillIn, gc);
-        gc.gridy++;
-        gcLabel.gridy++;
-        panel.add(allowAssembly, gc);
+        panel.add(permissions, gc);
+
+        permissions.add(compression);
+        permissions.add(allowPrinting);
+        permissions.add(allowModification);
+        permissions.add(allowExtraction);
+        permissions.add(allowFillIn);
+        permissions.add(allowAssembly);
 
         pages.addSelectionListener(e -> setSelectedPage(e.getFirstIndex() < 0 ? null : pages.getSelectedPage()));
 
@@ -335,7 +329,6 @@ public class UI extends JSplitPane {
         });
 
         saveButton.addActionListener(e -> doSave());
-
 
         setLeftComponent(panel);
         JScrollPane scrollPane = new JScrollPane(pages);
