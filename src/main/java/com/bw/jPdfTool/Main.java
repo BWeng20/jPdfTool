@@ -13,6 +13,9 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * CLI interface. Accepts file names as arguments and opens the UI.
+ */
 public class Main {
 
     public static void main(String[] args) {
@@ -63,6 +66,7 @@ public class Main {
 
         mainWindow.setJMenuBar(ui.getMenu());
         mainWindow.setLocationByPlatform(true);
+        ui.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
         mainWindow.setContentPane(ui);
         mainWindow.pack();
         mainWindow.setVisible(true);

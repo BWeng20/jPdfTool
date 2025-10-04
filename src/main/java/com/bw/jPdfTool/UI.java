@@ -52,14 +52,16 @@ public class UI extends JSplitPane {
     private final JTextField ownerPasswordField = new JTextField();
     private final JTextField userPasswordField = new JTextField();
 
-    private final DefaultListModel<String> filePathsModel = new DefaultListModel<>();
-    private final JList<String> filePaths = new JList<>(filePathsModel);
     private final JButton saveButton = new JButton("Write To File");
     private final JCheckBox compression = new JCheckBox("Compression");
 
     private final PageWidgetContainer pages = new PageWidgetContainer();
     protected DocumentProxy documentProxy;
     private PageWidget selectedPage;
+
+    private final JTextField pageCount = new JTextField(4);
+    private final JLabel statusMessage = new JLabel();
+
 
     /////////////////////////////////////////////
     // Permissions
@@ -75,14 +77,17 @@ public class UI extends JSplitPane {
     // Page manipulation
     /// //////////////////////////////////////////
 
-    private final JButton deleteButton;
-    private final JButton rotateClockwiseButton;
-    private final JButton moveLeft;
-    private final JButton moveRight;
-    private final JButton images;
-    private final JTextField rotation = new JTextField();
+    private final JButton deleteButton = new JButton(getIcon("delete"));
+    private final JButton rotateClockwiseButton = new JButton(getIcon("rotateClockwise"));
+    private final JButton moveLeft = new JButton(getIcon("moveLeft"));
+    private final JButton moveRight = new JButton(getIcon("moveRight"));
+    private final JButton exportImages = new JButton("<html>Export<br>Images</html>");
+    private final JTextField rotation = new JTextField(4);
     private final JLabel pageNb = new JLabel();
     private final JLabel quality = new JLabel();
+    private final JButton browseButton = new JButton(getIcon("openPdf"));
+    private final JButton browseAppendButton = new JButton(getIcon("addPdf"));
+    private final JButton help = new JButton(UIManager.getIcon("OptionPane.informationIcon"));
 
     /////////////////////////////////////////////
     // Splitting
@@ -121,23 +126,26 @@ public class UI extends JSplitPane {
         });
 
         JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 5));
 
-        JButton generateOwner = new JButton("Random");
+        JButton generateOwner = new JButton("Generate Owner Password");
+
+        help.addActionListener(e -> {
+            JOptionPane.showMessageDialog(this,
+                    "<html><font size='+1'>To prevent unauthorized access to a PDF, you only need to set a user password.<br>" +
+                            "If you also want to define specific permissions - such as restricting printing or " +
+                            "editing - you must set both an owner password and a user password.<br>" +
+                            "The owner password always grants full control over the document, while the user password " +
+                            "enforces only the permissions you've selected.<br>" +
+                            "Most tools use a random owner password.</font></html>");
+        });
 
         compression.setSelected(true);
         allowPrinting.setSelected(true);
         saveButton.setEnabled(false);
+        browseAppendButton.setEnabled(false);
         splitDocument.setEnabled(false);
         rotation.setEditable(false);
-
-        JButton browseButton = new JButton("Open");
-        JButton browseAppendButton = new JButton("Merge");
-
-        JLabel filePathLabel = new JLabel("Loaded files");
-
-        JScrollPane filePathScroller = new JScrollPane(filePaths);
-        filePathLabel.setLabelFor(filePathScroller);
 
         JLabel ownerPasswordLabel = new JLabel("Owner Password");
         ownerPasswordLabel.setLabelFor(ownerPasswordField);
@@ -151,82 +159,35 @@ public class UI extends JSplitPane {
         gcLabel.insets = new Insets(0, 0, 0, 5);
 
         GridBagConstraints gc = new GridBagConstraints();
-        gc.anchor = GridBagConstraints.WEST;
-        gc.fill = GridBagConstraints.HORIZONTAL;
-        gc.insets = new Insets(0, 0, 5, 0);
-
-        gcLabel.gridx = 0;
-        gcLabel.gridy = 0;
-        gc.gridx = 1;
+        gc.insets = new Insets(0, 0, 5, 5);
+        gc.gridx = 0;
         gc.gridy = 0;
-        gc.weightx = 1;
-        gc.gridwidth = 1;
-
-        panel.add(filePathLabel, gcLabel);
-        filePathScroller.setMinimumSize(new Dimension(0, fm.getHeight() * 5));
-        panel.add(filePathScroller, gc);
-        gc.gridx++;
-        gc.weightx = 0;
-
-        JPanel browseButtons = new JPanel(new GridLayout(2, 1));
-        browseButtons.add(browseButton);
-        browseButtons.add(browseAppendButton);
-
-        gc.anchor = GridBagConstraints.NORTHWEST;
-        panel.add(browseButtons, gc);
-
-        gcLabel.gridy++;
-        panel.add(ownerPasswordLabel, gcLabel);
-        gc.weightx = 1;
-        gc.gridx--;
-        gc.gridy++;
-        gc.gridwidth = 1;
-        panel.add(ownerPasswordField, gc);
-        gc.gridx++;
-        gc.weightx = 0;
-        panel.add(generateOwner, gc);
-        gcLabel.gridy++;
-        panel.add(userPasswordLabel, gcLabel);
-        gc.weightx = 1;
-        gc.gridx--;
         gc.gridwidth = 2;
-        gc.gridy++;
-        panel.add(userPasswordField, gc);
-
-        JPanel permissions = new JPanel(new GridLayout(3, 2));
-
-        gc.weightx = 0;
-        gc.gridy++;
-        panel.add(permissions, gc);
-
-        permissions.add(compression);
-        permissions.add(allowPrinting);
-        permissions.add(allowModification);
-        permissions.add(allowExtraction);
-        permissions.add(allowFillIn);
-        permissions.add(allowAssembly);
+        gc.weightx = 1;
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        gc.anchor = GridBagConstraints.NORTHWEST;
+        panel.add(createDocumentPanel(), gc);
 
         pages.addSelectionListener(e -> setSelectedPage(e.getFirstIndex() < 0 ? null : pages.getSelectedPage()));
 
-        deleteButton = new JButton(getIcon("delete"));
+        deleteButton.setOpaque(false);
         deleteButton.setToolTipText("Deletes the current page.");
         deleteButton.addActionListener(e -> doDeletePage());
 
-        rotateClockwiseButton = new JButton(getIcon("rotateClockwise"));
+        rotateClockwiseButton.setOpaque(false);
         rotateClockwiseButton.setToolTipText("Rotates the current page clockwise.");
         rotateClockwiseButton.addActionListener(e -> doRotateClockwise());
 
-        moveLeft = new JButton(getIcon("moveLeft"));
+        moveLeft.setOpaque(false);
         moveLeft.setToolTipText("Moves the current page up.");
         moveLeft.addActionListener(e -> doMoveLeft());
 
-        moveRight = new JButton(getIcon("moveRight"));
+        moveRight.setOpaque(false);
         moveRight.setToolTipText("Moves the current page down.");
         moveRight.addActionListener(e -> doMoveRight());
 
-        images = new JButton("Images");
-        images.setToolTipText("Shows embedded images of the current page.");
-        images.addActionListener(e -> {
+        exportImages.setToolTipText("Exports embedded images of the current page.");
+        exportImages.addActionListener(e -> {
             PageWidget pw = pages.getSelectedPage();
             if (pw != null) {
                 showImageExtractor(pw.getPage());
@@ -244,39 +205,71 @@ public class UI extends JSplitPane {
         pmGc.gridx++;
         manipulations.add(createSplitterPanel(), pmGc);
 
-        gcLabel.gridy++;
         gc.fill = GridBagConstraints.HORIZONTAL;
         gc.anchor = GridBagConstraints.NORTHWEST;
         gc.weightx = 1;
         gc.weighty = 0;
         gc.gridwidth = 3;
         gc.gridx = 0;
-        gc.gridy++;
+        gc.gridy = 2;
         panel.add(manipulations, gc);
 
+        gcLabel.gridx = 0;
+        gcLabel.gridy = 3;
+        panel.add(ownerPasswordLabel, gcLabel);
 
-        gcLabel.gridy++;
+        gc.gridx = 0;
+        gc.gridy = 4;
+        gc.gridwidth = 1;
+        gc.weightx = 1;
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        panel.add(ownerPasswordField, gc);
+        gc.gridx = 1;
+        gc.weightx = 0;
+        panel.add(generateOwner, gc);
+        gcLabel.gridy += 2;
+        panel.add(userPasswordLabel, gcLabel);
+        gc.weightx = 1;
+        gc.gridwidth = 2;
+        gc.gridx = 0;
+        gc.gridy += 2;
+        panel.add(userPasswordField, gc);
+
+        JPanel permissions = new JPanel(new GridLayout(3, 2));
+
+        permissions.add(compression);
+        permissions.add(allowPrinting);
+        permissions.add(allowModification);
+        permissions.add(allowExtraction);
+        permissions.add(allowFillIn);
+        permissions.add(allowAssembly);
+
+        gc.weightx = 1;
+        gc.gridx = 0;
         gc.gridy++;
+        gc.gridwidth = 1;
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        panel.add(permissions, gc);
+
+        gc.gridx = 1;
+        gc.weightx = 0;
+        gc.fill = GridBagConstraints.NONE;
+        panel.add(help, gc);
+
+        gc.gridx = 0;
+        gc.gridy++;
+        gc.gridwidth = 3;
+        gc.fill = GridBagConstraints.HORIZONTAL;
         panel.add(saveButton, gc);
 
+        gcLabel.gridy = gc.gridy + 1;
         gcLabel.anchor = GridBagConstraints.SOUTHWEST;
-        gcLabel.gridy++;
         gcLabel.weighty = 0.5;
         gcLabel.gridwidth = 3;
         gcLabel.fill = GridBagConstraints.BOTH;
         gcLabel.insets = new Insets(15, 5, 5, 5);
+        panel.add(Box.createGlue(), gcLabel);
 
-        JLabel info = new JLabel();
-        info.setVerticalAlignment(SwingConstants.BOTTOM);
-        info.setText("<html><font size='+1'>To prevent unauthorized access to a PDF, you only need to set a user password.<br>" +
-                "If you also want to define specific permissions - such as restricting printing or " +
-                "editing - you must set both an owner password and a user password.<br>" +
-                "The owner password always grants full control over the document, while the user password " +
-                "enforces only the permissions you've selected.<br>" +
-                "Most tools use a random owner password.</font></html>");
-
-
-        panel.add(info, gcLabel);
 
         String ownerPassword = null;
 
@@ -321,7 +314,7 @@ public class UI extends JSplitPane {
 
         setLeftComponent(panel);
         JScrollPane scrollPane = new JScrollPane(pages);
-        scrollPane.getViewport().setPreferredSize(new Dimension(charWith * 30, fm.getHeight() * 40));
+        scrollPane.getViewport().setPreferredSize(new Dimension(charWith * 50, fm.getHeight() * 40));
         setRightComponent(scrollPane);
 
         setDividerLocation(charWith * 65);
@@ -336,8 +329,57 @@ public class UI extends JSplitPane {
                 }
             }
         });
-
         renderQueue.start();
+    }
+
+    protected JPanel createDocumentPanel() {
+        JPanel documentPanel = new JPanel(new GridBagLayout());
+        documentPanel.setBorder(BorderFactory.createTitledBorder("Effective Document"));
+
+        JPanel browseButtons = new JPanel(new GridLayout(2, 1, 5, 5));
+
+        browseButton.setToolTipText("<html>Loads new document.<br>Resets the content to this file.</html>");
+        browseAppendButton.setToolTipText("<html>Adds another document.</html>");
+        browseButton.setOpaque(false);
+        browseAppendButton.setOpaque(false);
+
+        browseButtons.add(browseButton);
+        browseButtons.add(browseAppendButton);
+
+        pageCount.setEditable(false);
+        pageCount.setText("0");
+
+        GridBagConstraints gc = new GridBagConstraints();
+        gc.insets = new Insets(0, 5, 5, 5);
+        gc.gridx = 0;
+        gc.gridy = 0;
+        gc.gridwidth = 1;
+        gc.gridheight = 1;
+        gc.fill = GridBagConstraints.NONE;
+        gc.anchor = GridBagConstraints.WEST;
+
+        JLabel pageCountLabel = new JLabel("Pages");
+        pageCountLabel.setLabelFor(pageCount);
+        documentPanel.add(pageCountLabel, gc);
+
+        gc.gridx = 1;
+        gc.weightx = 1;
+        documentPanel.add(pageCount, gc);
+
+        gc.gridy = 0;
+        gc.gridx = 2;
+        gc.gridheight = 3;
+        gc.anchor = GridBagConstraints.EAST;
+        documentPanel.add(browseButtons, gc);
+
+        gc.gridy = 1;
+        gc.gridx = 0;
+        gc.gridheight = 2;
+        gc.gridwidth = 2;
+        gc.anchor = GridBagConstraints.WEST;
+        documentPanel.add(statusMessage, gc);
+
+        return documentPanel;
     }
 
     protected JPanel createSplitterPanel() {
@@ -369,16 +411,14 @@ public class UI extends JSplitPane {
         gc.gridy++;
         splitter.add(splitDocument, gc);
 
-
         splitter.setBorder(BorderFactory.createTitledBorder("Splitting"));
         return splitter;
-
     }
 
     protected JPanel createPageManipulationPanel() {
         JPanel pageManipulation = new JPanel(new GridBagLayout());
         GridBagConstraints gc = new GridBagConstraints();
-        gc.anchor = GridBagConstraints.NORTHWEST;
+        gc.anchor = GridBagConstraints.WEST;
         gc.insets = new Insets(0, 5, 5, 5);
         gc.gridx = 0;
         gc.gridy = 0;
@@ -410,12 +450,14 @@ public class UI extends JSplitPane {
         gc.gridx++;
         pageManipulation.add(moveRight, gc);
 
-        gc.gridx++;
         gc.gridy = 0;
-        pageManipulation.add(images, gc);
+        gc.gridheight = 2;
+        gc.anchor = GridBagConstraints.NORTH;
+        pageManipulation.add(exportImages, gc);
 
         gc.gridy++;
         gc.weightx = 0.1;
+        gc.gridheight = 1;
         pageManipulation.add(Box.createHorizontalGlue(), gc);
         pageManipulation.setBorder(BorderFactory.createTitledBorder("Page Manipulation"));
         return pageManipulation;
@@ -423,6 +465,9 @@ public class UI extends JSplitPane {
 
     private final JRadioButtonMenuItem lafLight = new JRadioButtonMenuItem("Light");
     private final JRadioButtonMenuItem lafDark = new JRadioButtonMenuItem("Dark");
+    private final JRadioButtonMenuItem lafSystem = new JRadioButtonMenuItem("OS Default");
+    private final JRadioButtonMenuItem lafCross = new JRadioButtonMenuItem("Cross Platform");
+
     private final JCheckBox storeOwnerPassword = new JCheckBox("Remember Owner Password");
 
     private final JPrefCheckBoxMenuItem viewQualityAA
@@ -439,7 +484,6 @@ public class UI extends JSplitPane {
     private final JRadioButtonMenuItem viewQualityRenderQuality = new JPrefRadioButtonMenuItem(
             "Rendering for quality", Preferences.USER_PREF_VIEWER_RENDER_QUALITY, false, true);
 
-
     private JMenuBar menuBar;
 
     protected void setLaf(String laf) {
@@ -453,6 +497,8 @@ public class UI extends JSplitPane {
                     SwingUtilities.updateComponentTreeUI(imageChooser);
                 SwingUtilities.updateComponentTreeUI(mergeOptions);
                 Preferences.getInstance().set(Preferences.USER_PREF_LAF, laf);
+                help.setOpaque(false);
+                help.setIcon(UIManager.getIcon("OptionPane.informationIcon"));
                 Log.info("Switched to %s", laf);
             }
         } catch (Exception e) {
@@ -470,15 +516,21 @@ public class UI extends JSplitPane {
 
             lafDark.addActionListener(e -> setLaf(Preferences.LAF_DARK_CLASSNAME));
             lafLight.addActionListener(e -> setLaf(Preferences.LAF_LIGHT_CLASSNAME));
+            lafSystem.addActionListener(e -> setLaf(UIManager.getSystemLookAndFeelClassName()));
+            lafCross.addActionListener(e -> setLaf(UIManager.getCrossPlatformLookAndFeelClassName()));
 
             menuBar = new JMenuBar();
 
             JMenu laf = new JMenu("Look And Feel");
             laf.add(lafLight);
             laf.add(lafDark);
+            laf.add(lafCross);
+            laf.add(lafSystem);
             ButtonGroup lafGroup = new ButtonGroup();
             lafGroup.add(lafLight);
             lafGroup.add(lafDark);
+            lafGroup.add(lafCross);
+            lafGroup.add(lafSystem);
 
             storeOwnerPassword.setToolTipText(
                     "<html>Stores the owner password in user preferences.<br>" +
@@ -538,7 +590,6 @@ public class UI extends JSplitPane {
 
                 options.add(viewerQuality);
             }
-
             menuBar.add(options);
         }
 
@@ -547,15 +598,17 @@ public class UI extends JSplitPane {
 
         if (Preferences.LAF_DARK_CLASSNAME.equals(currentLafClassName))
             lafDark.setSelected(true);
-        if (Preferences.LAF_LIGHT_CLASSNAME.equals(currentLafClassName))
+        else if (Preferences.LAF_LIGHT_CLASSNAME.equals(currentLafClassName))
             lafLight.setSelected(true);
+        else if (UIManager.getCrossPlatformLookAndFeelClassName().equals(currentLafClassName))
+            lafCross.setSelected(true);
+        else if (UIManager.getSystemLookAndFeelClassName().equals(currentLafClassName))
+            lafSystem.setSelected(true);
 
         storeOwnerPassword.setSelected(Preferences.getInstance().getBoolean(
                 Preferences.USER_PREF_STORE_OWNER_PASSWORD, false));
-
         return menuBar;
     }
-
 
     protected void setDpi(int dpi) {
         Preferences.getInstance().set(Preferences.USER_PREF_DPI, dpi);
@@ -603,9 +656,7 @@ public class UI extends JSplitPane {
         } finally {
             mergeOptions.uninstall(chooser);
         }
-
     }
-
 
     /**
      * Moves the selected page.
@@ -669,6 +720,7 @@ public class UI extends JSplitPane {
                 chooser.setMultiSelectionEnabled(false);
                 chooser.setDialogTitle("Choose a base file name for split…");
                 JLabel info = new JLabel("<html>Choose a base file name,<br>the index of the file will be put<br><b>behind</b> the name</html>");
+                info.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
                 info.setVerticalAlignment(JLabel.TOP);
                 chooser.setAccessory(info);
                 int result = chooser.showSaveDialog(this);
@@ -688,7 +740,7 @@ public class UI extends JSplitPane {
                     }
 
                     int fileCount = 0;
-                    final PDDocument source = documentProxy.getLoadedDocument();
+                    final PDDocument source = documentProxy.getDocument();
                     Splitter splitter = new Splitter();
                     splitter.setSplitAtPage(pagePerDocument);
                     try {
@@ -716,7 +768,7 @@ public class UI extends JSplitPane {
         String userPwd = userPasswordField.getText().trim();
 
         if (documentProxy != null) {
-            PDDocument document = documentProxy.getLoadedDocument();
+            PDDocument document = documentProxy.getDocument();
             if (document != null) {
                 try {
                     AccessPermission ap = new AccessPermission();
@@ -781,14 +833,14 @@ public class UI extends JSplitPane {
         return (overwrite == JOptionPane.YES_OPTION);
     }
 
-
     public static Icon getIcon(String name) {
         synchronized (icons) {
             Icon i = icons.get(name);
             if (i == null) {
                 try (InputStream is = UI.class.getResourceAsStream("/" + name + ".svg")) {
-                    i = new ShapeIcon(SVGConverter.convert(is));
-                    icons.put(name, i);
+                    ShapeIcon si = new ShapeIcon(SVGConverter.convert(is));
+                    icons.put(name, si);
+                    i = si;
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -804,7 +856,7 @@ public class UI extends JSplitPane {
         rotateClockwiseButton.setEnabled(enabled);
         moveLeft.setEnabled(enabled);
         moveRight.setEnabled(enabled);
-        images.setEnabled(enabled);
+        exportImages.setEnabled(enabled);
         if (enabled) {
             pageNb.setText("Page " + page.getPageNumber());
             quality.setText(String.format("%d dpi (x %.2f)", page.getPage().dpi, page.getScale()));
@@ -815,7 +867,6 @@ public class UI extends JSplitPane {
             quality.setText("");
         }
     }
-
 
     protected void appendPdf(File file, MergeOptions mo) {
         if (documentProxy == null)
@@ -830,10 +881,8 @@ public class UI extends JSplitPane {
         }
     }
 
-
     private boolean busy;
     private JPanel glassPane;
-
 
     public void setBusy(boolean busy) {
         if (this.busy != busy) {
@@ -857,7 +906,6 @@ public class UI extends JSplitPane {
      */
     protected void selectPdf(File selectedFile) {
         selectedFile = selectedFile.getAbsoluteFile();
-        filePathsModel.clear();
         String parent = selectedFile.getParent();
         if (parent != null)
             Preferences.getInstance().set(Preferences.USER_PREF_LAST_PDF_DIR, parent);
@@ -870,24 +918,34 @@ public class UI extends JSplitPane {
         documentProxy.setOwnerPassword(ownerPasswordField.getText());
 
         documentProxy.addDocumentConsumer(new DocumentProxy.DocumentConsumer() {
+
             @Override
-            public void documentLoaded(PDDocument document, Path file) {
-                saveButton.setEnabled(document != null);
-                splitDocument.setEnabled(document != null);
-                if (file != null)
-                    filePathsModel.addElement(file.toString());
+            public void documentLoaded(PDDocument document) {
+                // This method is called each time some file wasloaded.
+                // "document" is always the main effective document.
+                saveButton.setEnabled(true);
+                splitDocument.setEnabled(true);
+                browseAppendButton.setEnabled(true);
+                pageCount.setText(String.format("%d", documentProxy.getPageCount()));
+                statusMessage.setText("");
             }
 
             @Override
             public void failed(String error) {
                 saveButton.setEnabled(false);
                 splitDocument.setEnabled(false);
-                filePathsModel.addElement(error);
+                browseAppendButton.setEnabled(false);
                 documentProxy = null;
+                statusMessage.setText(error == null ? "" : error);
             }
         });
         pages.setDocument(documentProxy);
-        documentProxy.load(selectedFile.toPath(), new MergeOptions());
+        Path p;
+        try {
+            documentProxy.load(selectedFile.toPath(), new MergeOptions());
+        } catch (Exception e) {
+            statusMessage.setText(e.getMessage());
+        }
     }
 
     protected void checkPassword() {
@@ -944,7 +1002,6 @@ public class UI extends JSplitPane {
         return savePdfChooser;
     }
 
-
     PageImageViewer pageImageViewer;
     JDialog imageExtractorDialog;
 
@@ -970,4 +1027,5 @@ public class UI extends JSplitPane {
         pageImageViewer.setPage(page);
         imageExtractorDialog.setVisible(true);
     }
+
 }

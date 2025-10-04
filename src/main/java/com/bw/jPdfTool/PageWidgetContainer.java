@@ -12,7 +12,6 @@ import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -42,9 +41,10 @@ public class PageWidgetContainer extends JComponent {
                 fireSelectionEvent(page.pageNb - 1);
         }
     };
+
     private final DocumentProxy.DocumentConsumer docConsumer = new DocumentProxy.DocumentConsumer() {
         @Override
-        public void documentLoaded(PDDocument document, Path file) {
+        public void documentLoaded(PDDocument document) {
             int idx = getSelectedPageIndex();
             removeAll();
             widgets.clear();
@@ -52,11 +52,12 @@ public class PageWidgetContainer extends JComponent {
             orgPageCount = -1;
             int newPageCount = document.getNumberOfPages();
             ensurePage(newPageCount);
-            if (idx >= 0)
+            if (idx >= 0) {
                 if (widgets.isEmpty())
                     setSelectedPage(null, true);
                 else
                     setSelectedPage(widgets.get(Math.min(idx, widgets.size() - 1)));
+            }
             repaint();
         }
 

@@ -69,9 +69,9 @@ public class RenderQueue {
                 }
                 if (proxy.isClosed())
                     continue;
-                PDDocument document = proxy.getLoadedDocument();
+                PDDocument document = proxy.getDocument();
                 if (document != null) {
-                    Log.debug("Render document od #%d started", document.getDocumentId());
+                    Log.debug("Render document started");
                     PDFRenderer renderer = new PDFRenderer(document);
 
                     RenderingHints renderingHints = new RenderingHints(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);

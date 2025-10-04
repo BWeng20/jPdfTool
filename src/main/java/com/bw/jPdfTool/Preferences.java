@@ -45,6 +45,7 @@ public class Preferences {
     public final static String LAF_DARK_CLASSNAME = "com.formdev.flatlaf.FlatDarkLaf";
     public final static String LAF_LIGHT_CLASSNAME = "com.formdev.flatlaf.FlatLightLaf";
 
+
     public final static String DEFAULT_LAF = LAF_LIGHT_CLASSNAME;
 
     private final java.util.prefs.Preferences prefs = java.util.prefs.Preferences.userRoot().node("jpdftool");
@@ -55,7 +56,6 @@ public class Preferences {
             support.firePropertyChange(evt.getKey(), null, evt.getNewValue());
         });
     }
-
 
     private static final Preferences instance = new Preferences();
 
@@ -89,7 +89,11 @@ public class Preferences {
     }
 
     public void set(String key, String value) {
-        prefs.put(key, value);
+        if (value == null) {
+            if (prefs.get(key, null) != null)
+                prefs.remove(key);
+        } else if (!value.equals(prefs.get(key, null)))
+            prefs.put(key, value);
     }
 
     public void set(String key, boolean value) {

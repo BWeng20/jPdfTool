@@ -55,6 +55,6 @@ public class Page {
     }
 
     public List<ImageResource> getImages() {
-        return new ArrayList<>(ImageExtractor.getImages(document.getLoadedDocument(), pageNb - 1));
+        return new ArrayList<>(ImageExtractor.getImages(document.getDocument(), pageNb - 1));
     }
 }

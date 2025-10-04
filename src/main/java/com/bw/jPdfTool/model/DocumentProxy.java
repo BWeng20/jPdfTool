@@ -11,6 +11,7 @@ import org.apache.pdfbox.pdmodel.PDPageTree;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 
 import javax.swing.*;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -24,7 +25,6 @@ import java.util.concurrent.Future;
 public class DocumentProxy {
 
     private final List<Page> pages = new ArrayList<>();
-    private final List<Path> files = new ArrayList<>();
     private final List<DocumentConsumer> docConsumerList = new ArrayList<>();
     private boolean closed = false;
     private String owerPassword4Load;
@@ -68,7 +68,7 @@ public class DocumentProxy {
             currentLoader = loadWorker.pollFirst();
             if (currentLoader != null)
                 currentLoader.execute();
-            else {
+            else if (DocumentProxy.this.document != null) {
                 int pageCount = DocumentProxy.this.document.getNumberOfPages();
                 while (pages.size() < pageCount) {
                     Page page = new Page(DocumentProxy.this, pages.size() + 1, pageCount);
@@ -88,16 +88,12 @@ public class DocumentProxy {
         return error;
     }
 
-    public List<Path> getPaths() {
-        return files;
-    }
-
     /**
-     * Get the loaded docunent
+     * Get the effective document
      *
-     * @return Null if document was not loaded.
+     * @return Null if no document was loaded yet.
      */
-    public PDDocument getLoadedDocument() {
+    public PDDocument getDocument() {
         return document;
     }
 
@@ -119,7 +115,7 @@ public class DocumentProxy {
                 startNextLoader();
             } else {
                 error = "File is protected.\nPassword needed.";
-                fireDocumentLoaded(null);
+                fireDocumentLoaded(-1);
             }
         });
     }
@@ -178,7 +174,7 @@ public class DocumentProxy {
         }
         synchronized (this) {
             if (document != null) {
-                consumer.documentLoaded(document, files.isEmpty() ? null : files.get(0));
+                consumer.documentLoaded(document);
             } else if (error != null) {
                 consumer.failed(error);
             }
@@ -191,7 +187,7 @@ public class DocumentProxy {
         }
     }
 
-    protected void fireDocumentLoaded(Path file) {
+    protected void fireDocumentLoaded(int pageAdded) {
         if (closed)
             return;
         List<DocumentConsumer> l;
@@ -201,7 +197,7 @@ public class DocumentProxy {
         for (var dc : l) {
             if (error == null) {
                 if (document != null)
-                    dc.documentLoaded(document, file);
+                    dc.documentLoaded(document);
             } else
                 dc.failed(error);
         }
@@ -337,7 +333,7 @@ public class DocumentProxy {
     }
 
     private void refirePages() {
-        fireDocumentLoaded(null);
+        fireDocumentLoaded(pages.size());
         boolean imageMissing = false;
         List<Page> pagesToFire;
         synchronized (this) {
@@ -419,9 +415,9 @@ public class DocumentProxy {
         /**
          * Load operation was successful .
          *
-         * @param document The document, never null
+         * @param document The effective main document, never null
          */
-        void documentLoaded(PDDocument document, Path file);
+        void documentLoaded(PDDocument document);
 
         void failed(String error);
     }
@@ -449,6 +445,9 @@ public class DocumentProxy {
                 error = "File is encrypted and owner password\ndoesn't match";
                 passwordNeeded = true;
                 return null;
+            } catch (NoSuchFileException fe) {
+                error = String.format("File '%s' does not exist", file.getFileName());
+                return null;
             } catch (Exception e) {
                 error = e.getMessage();
                 return null;
@@ -459,6 +458,7 @@ public class DocumentProxy {
         protected void done() {
             try {
                 boolean fireLoaded = false;
+                int oldPageCount = -1;
                 synchronized (DocumentProxy.this) {
                     Log.debug("DONE (%s)", file);
                     currentLoader = null;
@@ -468,7 +468,6 @@ public class DocumentProxy {
                             requestOwnerPassword(file, mo);
                         } else {
                             if (document != null) {
-                                int oldPageCount = -1;
                                 int pageCount;
                                 if (DocumentProxy.this.document == null) {
                                     DocumentProxy.this.document = document;
@@ -527,15 +526,19 @@ public class DocumentProxy {
 
                                 // Tell anyone, that a new document is loaded.
                                 fireLoaded = true;
+                            } else if (error != null) {
+                                fireLoaded = true;
                             }
                         }
                     }
                 }
-                if (fireLoaded)
-                    fireDocumentLoaded(file);
+                if (fireLoaded) {
+                    int pc = getPageCount();
+                    fireDocumentLoaded(oldPageCount < 0 ? pc : pc - oldPageCount);
+                }
             } catch (Exception e) {
                 error = e.getMessage();
-                fireDocumentLoaded(null);
+                fireDocumentLoaded(-1);
             }
             startNextLoader();
         }
