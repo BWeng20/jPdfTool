@@ -130,15 +130,13 @@ public class UI extends JSplitPane {
 
         JButton generateOwner = new JButton("Generate Owner Password");
 
-        help.addActionListener(e -> {
-            JOptionPane.showMessageDialog(this,
-                    "<html><font size='+1'>To prevent unauthorized access to a PDF, you only need to set a user password.<br>" +
-                            "If you also want to define specific permissions - such as restricting printing or " +
-                            "editing - you must set both an owner password and a user password.<br>" +
-                            "The owner password always grants full control over the document, while the user password " +
-                            "enforces only the permissions you've selected.<br>" +
-                            "Most tools use a random owner password.</font></html>");
-        });
+        help.addActionListener(e -> JOptionPane.showMessageDialog(this,
+                "<html><font size='+1'>To prevent unauthorized access to a PDF, you only need to set a user password.<br>" +
+                        "If you also want to define specific permissions - such as restricting printing or " +
+                        "editing - you must set both an owner password and a user password.<br>" +
+                        "The owner password always grants full control over the document, while the user password " +
+                        "enforces only the permissions you've selected.<br>" +
+                        "Most tools use a random owner password.</font></html>"));
 
         compression.setSelected(true);
         allowPrinting.setSelected(true);
@@ -940,7 +938,6 @@ public class UI extends JSplitPane {
             }
         });
         pages.setDocument(documentProxy);
-        Path p;
         try {
             documentProxy.load(selectedFile.toPath(), new MergeOptions());
         } catch (Exception e) {

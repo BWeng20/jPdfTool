@@ -115,7 +115,7 @@ public class DocumentProxy {
                 startNextLoader();
             } else {
                 error = "File is protected.\nPassword needed.";
-                fireDocumentLoaded(-1);
+                fireDocumentLoaded();
             }
         });
     }
@@ -187,7 +187,7 @@ public class DocumentProxy {
         }
     }
 
-    protected void fireDocumentLoaded(int pageAdded) {
+    protected void fireDocumentLoaded() {
         if (closed)
             return;
         List<DocumentConsumer> l;
@@ -333,7 +333,7 @@ public class DocumentProxy {
     }
 
     private void refirePages() {
-        fireDocumentLoaded(pages.size());
+        fireDocumentLoaded();
         boolean imageMissing = false;
         List<Page> pagesToFire;
         synchronized (this) {
@@ -533,16 +533,14 @@ public class DocumentProxy {
                     }
                 }
                 if (fireLoaded) {
-                    int pc = getPageCount();
-                    fireDocumentLoaded(oldPageCount < 0 ? pc : pc - oldPageCount);
+                    fireDocumentLoaded();
                 }
             } catch (Exception e) {
                 error = e.getMessage();
-                fireDocumentLoaded(-1);
+                fireDocumentLoaded();
             }
             startNextLoader();
         }
     }
-
 
 }
