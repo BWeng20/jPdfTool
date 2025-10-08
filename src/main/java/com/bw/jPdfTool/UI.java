@@ -7,7 +7,6 @@ import com.bw.jtools.svg.SVGConverter;
 import com.bw.jtools.ui.ShapeIcon;
 import com.formdev.flatlaf.FlatLaf;
 import org.apache.pdfbox.multipdf.Splitter;
-import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
@@ -26,7 +25,6 @@ import java.awt.dnd.DropTargetDropEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -43,6 +41,8 @@ import java.util.List;
 public class UI extends JSplitPane {
 
     private static final Map<String, Icon> icons = new HashMap<>();
+
+    private int encryptionKeyLength = 256;
 
     protected static JFileChooser savePdfChooser;
     protected static JFileChooser pdfChooser;
@@ -129,13 +129,17 @@ public class UI extends JSplitPane {
             public void drop(DropTargetDropEvent dtde) {
                 try {
                     dtde.acceptDrop(DnDConstants.ACTION_COPY_OR_MOVE);
-                    java.util.List<File> droppedFiles = (java.util.List<File>) dtde.getTransferable()
-                            .getTransferData(DataFlavor.javaFileListFlavor);
-                    if (!droppedFiles.isEmpty()) {
-                        if (dtde.getDropAction() == DnDConstants.ACTION_COPY) {
-                            appendPdf(droppedFiles.get(0), new MergeOptions());
-                        } else {
-                            selectPdf(droppedFiles.get(0));
+                    if (dtde.getTransferable().getTransferData(DataFlavor.javaFileListFlavor) instanceof java.util.List<?> droppedFiles) {
+                        boolean append = dtde.getDropAction() == DnDConstants.ACTION_COPY;
+                        for (Object item : droppedFiles) {
+                            if (item instanceof File file) {
+                                if (append && documentProxy != null) {
+                                    appendPdf(file, new MergeOptions());
+                                } else {
+                                    selectPdf(file);
+                                    append = true;
+                                }
+                            }
                         }
                     }
                 } catch (Exception ex) {
@@ -268,11 +272,7 @@ public class UI extends JSplitPane {
         permissions.add(allowFillIn);
         permissions.add(allowAssembly);
 
-        allowAnnotations.addItemListener(e -> {
-            SwingUtilities.invokeLater(() -> {
-                updatePermissions();
-            });
-        });
+        allowAnnotations.addItemListener(e -> SwingUtilities.invokeLater(this::updatePermissions));
 
         gc.weightx = 1;
         gc.gridx = 0;
@@ -607,6 +607,11 @@ public class UI extends JSplitPane {
         return pageManipulation;
     }
 
+    private final JRadioButtonMenuItem encryptionKeyLength40 = new JRadioButtonMenuItem("40-Bit");
+    private final JRadioButtonMenuItem encryptionKeyLength128 = new JRadioButtonMenuItem("128-Bit");
+    private final JRadioButtonMenuItem encryptionKeyLength256 = new JRadioButtonMenuItem("256-Bit");
+
+
     private final JRadioButtonMenuItem lafLight = new JRadioButtonMenuItem("Light");
     private final JRadioButtonMenuItem lafDark = new JRadioButtonMenuItem("Dark");
     private final JRadioButtonMenuItem lafSystem = new JRadioButtonMenuItem("OS Default");
@@ -661,8 +666,22 @@ public class UI extends JSplitPane {
         return Preferences.getInstance().getString(key, defaultValue);
     }
 
+
+    public void setEncryptionKeyLength(int bits) {
+        if (bits != 40 && bits != 128 && bits != 256)
+            throw new IllegalArgumentException("Encryption Key Length must be 40, 128 or 256");
+        if (this.encryptionKeyLength != bits) {
+            this.encryptionKeyLength = bits;
+            Preferences.getInstance().set(Preferences.USER_ENCRYPTION_KEY_LENGTH, bits);
+        }
+    }
+
     public synchronized JMenuBar getMenu() {
         if (menuBar == null) {
+
+            encryptionKeyLength40.addActionListener(e -> setEncryptionKeyLength(40));
+            encryptionKeyLength128.addActionListener(e -> setEncryptionKeyLength(128));
+            encryptionKeyLength256.addActionListener(e -> setEncryptionKeyLength(256));
 
             lafDark.addActionListener(e -> setLaf(Preferences.LAF_DARK_CLASSNAME));
             lafLight.addActionListener(e -> setLaf(Preferences.LAF_LIGHT_CLASSNAME));
@@ -670,6 +689,15 @@ public class UI extends JSplitPane {
             lafCross.addActionListener(e -> setLaf(UIManager.getCrossPlatformLookAndFeelClassName()));
 
             menuBar = new JMenuBar();
+
+            JMenu encryptionKeyLengthMenu = new JMenu("Encryption Key Length");
+            encryptionKeyLengthMenu.add(encryptionKeyLength40);
+            encryptionKeyLengthMenu.add(encryptionKeyLength128);
+            encryptionKeyLengthMenu.add(encryptionKeyLength256);
+            ButtonGroup encryptionKeyLengthGroup = new ButtonGroup();
+            encryptionKeyLengthGroup.add(encryptionKeyLength40);
+            encryptionKeyLengthGroup.add(encryptionKeyLength128);
+            encryptionKeyLengthGroup.add(encryptionKeyLength256);
 
             JMenu laf = new JMenu("Look And Feel");
             laf.add(lafLight);
@@ -713,8 +741,20 @@ public class UI extends JSplitPane {
                 dpiItem.addActionListener(e -> setDpi(dpiFinal));
             }
 
+            this.encryptionKeyLength = Preferences.getInstance().getInt(Preferences.USER_ENCRYPTION_KEY_LENGTH, 256);
+            switch (this.encryptionKeyLength) {
+                case 40 -> encryptionKeyLength40.setSelected(true);
+                case 128 -> encryptionKeyLength128.setSelected(true);
+                case 256 -> encryptionKeyLength256.setSelected(true);
+                default -> {
+                    this.encryptionKeyLength = 256;
+                    encryptionKeyLength256.setSelected(true);
+                }
+            }
+
             JMenu options = new JMenu("Options");
             options.add(storeOwnerPassword);
+            options.add(encryptionKeyLengthMenu);
             options.add(laf);
             options.add(renderQuality);
 
@@ -915,15 +955,32 @@ public class UI extends JSplitPane {
      * Requests a file name and saves the document.
      */
     protected void doSave() {
-        String ownerPwd = ownerPasswordField.getText().trim();
-        String userPwd = userPasswordField.getText().trim();
+        if (documentProxy != null && documentProxy.getDocument() != null) {
 
-        statusMessage.setText("");
+            try {
+                JFileChooser chooser = getSavePdfChooser();
+                int result = chooser.showSaveDialog(this);
+                if (result == JFileChooser.APPROVE_OPTION) {
+                    statusMessage.setText("");
 
-        if (documentProxy != null) {
-            PDDocument document = documentProxy.getDocument();
-            if (document != null) {
-                try {
+                    File selectedFile = chooser.getSelectedFile();
+                    Path selectedFilePath = selectedFile.toPath();
+
+                    String fname = selectedFilePath.getFileName().toString();
+                    int idx = fname.lastIndexOf('.');
+                    if (idx < 0) {
+                        selectedFilePath = selectedFilePath.getParent().resolve(fname + ".pdf");
+                    }
+
+                    if (Files.exists(selectedFilePath) && !askOverwrite(this, selectedFilePath)) {
+                        return;
+                    }
+
+                    String ownerPwd = ownerPasswordField.getText().trim();
+                    String userPwd = userPasswordField.getText().trim();
+
+                    PDDocument document = documentProxy.getCopy();
+
                     AccessPermission ap = new AccessPermission();
                     ap.setCanPrint(allowPrinting.isSelected());
                     ap.setCanModify(allowModification.isSelected());
@@ -933,97 +990,67 @@ public class UI extends JSplitPane {
                     ap.setCanAssembleDocument(allowAssembly.isSelected());
                     ap.setCanModifyAnnotations(allowAnnotations.isSelected());
 
-                    StandardProtectionPolicy spp = new StandardProtectionPolicy(ownerPwd, userPwd, ap);
-                    spp.setEncryptionKeyLength(128);
-                    document.protect(spp);
-
-                    JFileChooser chooser = getSavePdfChooser();
-                    int result = chooser.showSaveDialog(this);
-                    if (result == JFileChooser.APPROVE_OPTION) {
-                        File selectedFile = chooser.getSelectedFile();
-
-                        Path selectedFilePath = selectedFile.toPath();
-
-                        String fname = selectedFilePath.getFileName().toString();
-                        int idx = fname.lastIndexOf('.');
-                        if (idx < 0) {
-                            selectedFilePath = selectedFilePath.getParent().resolve(fname + ".pdf");
-                        }
-                        if (Files.exists(selectedFilePath)) {
-                            if (askOverwrite(this, selectedFilePath)) {
-                                setDocumentInformation(document);
-
-                                // PdfBox can't write to the same file. Write into buffer, close original,
-                                // then re-open it.
-                                ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
-                                document.save(os, compression.isSelected()
-                                        ? CompressParameters.DEFAULT_COMPRESSION : CompressParameters.NO_COMPRESSION);
-
-                                documentProxy.close();
-                                documentProxy = null;
-
-                                Files.write(selectedFilePath, os.toByteArray());
-
-                                selectPdf(selectedFilePath.toFile());
-                            } else {
-                                return;
-                            }
-                        } else {
-                            setDocumentInformation(document);
-                            document.save(selectedFilePath.toFile());
-                        }
-                        var prefs = Preferences.getInstance();
-                        if (prefs.getBoolean(Preferences.USER_PREF_STORE_OWNER_PASSWORD, false)) {
-                            prefs.set(Preferences.USER_PREF_OWNER_PASSWORD, ownerPwd);
-                        }
-
-                        List<Object> options = new ArrayList<>(2);
-                        options.add("OK");
-
-                        // If supported, give buttons to browse/view the result
-                        // in the system default application (vie Desktop-support)
-                        if (Desktop.isDesktopSupported()) {
-                            try {
-                                final URI finalFile = selectedFilePath.toUri();
-                                JButton open = new JButton("Open External");
-                                open.setToolTipText("<html>Tries to open the saved file with the<br>system's default application.</html>");
-                                open.addActionListener(e -> {
-                                    try {
-                                        Desktop.getDesktop().browse(finalFile);
-                                    } catch (Exception ex) {
-                                        JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-                                    }
-                                });
-                                options.add(open);
-                                final URI finalParent = selectedFilePath.getParent().toUri();
-                                JButton openDir = new JButton("Open Directory");
-                                openDir.setToolTipText("<html>Tries to open the directory with the system's<br>default application for browsing files.</html>");
-                                openDir.addActionListener(e -> {
-                                    try {
-                                        Desktop.getDesktop().browse(finalParent);
-                                    } catch (Exception ex) {
-                                        JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-                                    }
-                                });
-                                options.add(openDir);
-                            } catch (Exception ignored) {
-                                // Will possibly never happen
-                                ignored.printStackTrace();
-                            }
-                        }
-
-                        JOptionPane.showOptionDialog(this,
-                                "<html><font size='+1'>Stored PDF as<p><b>" + selectedFilePath + "</b></font><p></html>", "Stored",
-                                -1,
-                                JOptionPane.INFORMATION_MESSAGE, null, options.toArray(), null);
-
+                    if (ownerPwd.isEmpty() && userPwd.isEmpty()) {
+                        document.setAllSecurityToBeRemoved(true);
+                    } else {
+                        StandardProtectionPolicy spp = new StandardProtectionPolicy(ownerPwd, userPwd, ap);
+                        Log.info("Encryption-key-length %d bits", this.encryptionKeyLength);
+                        spp.setEncryptionKeyLength(this.encryptionKeyLength);
+                        document.protect(spp);
                     }
-                } catch (Exception ex) {
-                    JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-                } finally {
-                    if (documentProxy == null)
-                        selectPdf(null);
+
+                    setDocumentInformation(document);
+                    document.save(selectedFilePath.toFile());
+
+                    var prefs = Preferences.getInstance();
+                    if (prefs.getBoolean(Preferences.USER_PREF_STORE_OWNER_PASSWORD, false)) {
+                        prefs.set(Preferences.USER_PREF_OWNER_PASSWORD, ownerPwd);
+                    }
+
+                    List<Object> options = new ArrayList<>(2);
+                    options.add("OK");
+
+                    // If supported, give buttons to browse/view the result
+                    // in the system default application (vie Desktop-support)
+                    if (Desktop.isDesktopSupported()) {
+                        try {
+                            final URI finalFile = selectedFilePath.toUri();
+                            JButton open = new JButton("Open External");
+                            open.setToolTipText("<html>Tries to open the saved file with the<br>system's default application.</html>");
+                            open.addActionListener(e -> {
+                                try {
+                                    Desktop.getDesktop().browse(finalFile);
+                                } catch (Exception ex) {
+                                    JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                                }
+                            });
+                            options.add(open);
+                            final URI finalParent = selectedFilePath.getParent().toUri();
+                            JButton openDir = new JButton("Open Directory");
+                            openDir.setToolTipText("<html>Tries to open the directory with the system's<br>default application for browsing files.</html>");
+                            openDir.addActionListener(e -> {
+                                try {
+                                    Desktop.getDesktop().browse(finalParent);
+                                } catch (Exception ex) {
+                                    JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                                }
+                            });
+                            options.add(openDir);
+                        } catch (Exception ex) {
+                            // Will possibly never happen
+                            Log.error("Error in preparation of save-info buttons: %s", ex.getMessage());
+                        }
+                    }
+
+                    JOptionPane.showOptionDialog(this,
+                            "<html><font size='+1'>Stored PDF as<p><b>" + selectedFilePath + "</b></font><p></html>", "Stored",
+                            JOptionPane.DEFAULT_OPTION,
+                            JOptionPane.INFORMATION_MESSAGE, null, options.toArray(), null);
+
+
                 }
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
     }
@@ -1054,7 +1081,7 @@ public class UI extends JSplitPane {
                     icons.put(name, si);
                     i = si;
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    Log.error("Error in getting icon '%s': %s", name, e.getMessage());
                 }
             }
             return i;

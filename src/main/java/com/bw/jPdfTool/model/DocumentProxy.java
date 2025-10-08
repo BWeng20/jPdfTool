@@ -5,19 +5,22 @@ import com.bw.jPdfTool.RenderQueue;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
+import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageTree;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 
 import javax.swing.*;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
-import java.util.concurrent.Future;
 
 /**
  * Simple proxy for lazy asynchronous handling of the pdf documents.
@@ -45,16 +48,13 @@ public class DocumentProxy {
 
     /**
      * Triggers loading of the document in background
-     *
-     * @return The future with the document.
      */
-    public synchronized Future<PDDocument> load(Path file, MergeOptions mo) {
+    public synchronized void load(Path file, MergeOptions mo) {
         ensuredNotClosed();
         synchronized (this) {
             PdfLoadWorker lw = new PdfLoadWorker(file, mo);
             loadWorker.addLast(lw);
             startNextLoader();
-            return lw;
         }
     }
 
@@ -77,15 +77,6 @@ public class DocumentProxy {
                 renderQueue.addDocument(this);
             }
         }
-    }
-
-    /**
-     * Returns the error description if the document couldn't be loaded.
-     *
-     * @return null if no error occurred.
-     */
-    public String getError() {
-        return error;
     }
 
     /**
@@ -223,7 +214,7 @@ public class DocumentProxy {
             try {
                 document.close();
             } catch (Exception e) {
-                e.printStackTrace();
+                Log.error("Error closing document: %s", e.getMessage());
             }
             document = null;
         }
@@ -422,6 +413,20 @@ public class DocumentProxy {
         void failed(String error);
     }
 
+    /**
+     * Brute force copy. Writes to byte array and load it.
+     *
+     * @throws IOException If some write operation failed.
+     */
+    public PDDocument getCopy() throws IOException {
+        if (document != null) {
+            ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
+            document.save(os, CompressParameters.NO_COMPRESSION);
+            return Loader.loadPDF(os.toByteArray());
+        } else
+            return null;
+    }
+
     protected class PdfLoadWorker extends SwingWorker<PDDocument, Void> {
 
         protected boolean passwordNeeded = false;
@@ -436,10 +441,12 @@ public class DocumentProxy {
         @Override
         protected PDDocument doInBackground() {
             try {
+                byte[] data = Files.readAllBytes(file);
                 PDDocument document = owerPassword4Load != null
-                        ? Loader.loadPDF(file.toFile(), owerPassword4Load)
-                        : Loader.loadPDF(file.toFile());
+                        ? Loader.loadPDF(data, owerPassword4Load)
+                        : Loader.loadPDF(data);
                 error = null;
+                document.setAllSecurityToBeRemoved(true);
                 return document;
             } catch (InvalidPasswordException ep) {
                 error = "File is encrypted and owner password\ndoesn't match";

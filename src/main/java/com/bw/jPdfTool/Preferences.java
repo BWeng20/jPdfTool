@@ -26,6 +26,11 @@ public class Preferences {
     public final static String USER_PREF_STORE_OWNER_PASSWORD = "store-owner-password";
 
     /**
+     * User preferences key for the Encryption Key Length.
+     */
+    public final static String USER_ENCRYPTION_KEY_LENGTH = "encryption-key-length";
+
+    /**
      * User preferences key for the dpi quality option.
      */
     public final static String USER_PREF_DPI = "dpi";
