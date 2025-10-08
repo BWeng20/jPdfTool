@@ -9,6 +9,7 @@ import com.formdev.flatlaf.FlatLaf;
 import org.apache.pdfbox.multipdf.Splitter;
 import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 
@@ -29,6 +30,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
@@ -52,7 +54,7 @@ public class UI extends JSplitPane {
     private final JTextField ownerPasswordField = new JTextField();
     private final JTextField userPasswordField = new JTextField();
 
-    private final JButton saveButton = new JButton("Write To File");
+    private final JButton saveButton = new JButton("Write to File");
     private final JCheckBox compression = new JCheckBox("Compression");
 
     private final PageWidgetContainer pages = new PageWidgetContainer();
@@ -60,6 +62,15 @@ public class UI extends JSplitPane {
     private PageWidget selectedPage;
 
     private final JTextField pageCount = new JTextField(4);
+    private final JCheckBox useDocumentInformation = new JCheckBox("Use Information from first loaded Document");
+    private final JButton clearInformation = new JButton("Clear Information");
+    private final JTextField title = new JTextField(15);
+    private final JTextField author = new JTextField(15);
+    private final JTextField creator = new JTextField(15);
+    private final JTextField producer = new JTextField(15);
+    private final JTextField subject = new JTextField(15);
+
+    private final JTextField keywords = new JTextField(15);
     private final JLabel statusMessage = new JLabel();
 
 
@@ -87,7 +98,13 @@ public class UI extends JSplitPane {
     private final JLabel quality = new JLabel();
     private final JButton browseButton = new JButton(getIcon("openPdf"));
     private final JButton browseAppendButton = new JButton(getIcon("addPdf"));
-    private final JButton help = new JButton(UIManager.getIcon("OptionPane.informationIcon"));
+
+    private final String HELP_ICON_NAME = "OptionPane.questionIcon";
+
+    private final JButton help = new JButton(UIManager.getIcon(HELP_ICON_NAME));
+
+    private Font normalFont;
+    private Font hintFont;
 
     /////////////////////////////////////////////
     // Splitting
@@ -100,8 +117,9 @@ public class UI extends JSplitPane {
     public UI() {
         super(JSplitPane.HORIZONTAL_SPLIT);
 
-        Font f = UIManager.getFont("Panel.font");
-        final FontMetrics fm = getFontMetrics(f);
+        normalFont = UIManager.getFont("Panel.font");
+        hintFont = normalFont.deriveFont(Font.ITALIC);
+        final FontMetrics fm = getFontMetrics(normalFont);
         final int charWith = fm.charWidth('W');
 
         new DropTarget(this, new DropTargetAdapter() {
@@ -131,19 +149,24 @@ public class UI extends JSplitPane {
         JButton generateOwner = new JButton("Generate Owner Password");
 
         help.addActionListener(e -> JOptionPane.showMessageDialog(this,
-                "<html><font size='+1'>To prevent unauthorized access to a PDF, you only need to set a user password.<br>" +
-                        "If you also want to define specific permissions - such as restricting printing or " +
+                "<html><font size='+2'><b>How to set PDF Permissions</b></font><br>" +
+                        "<font size='+1'>" +
+                        "To prevent unauthorized access to a PDF, you only need to set a user password.<br>" +
+                        "If you also want to define specific permissions - such as restricting printing or<br>" +
                         "editing - you must set both an owner password and a user password.<br>" +
-                        "The owner password always grants full control over the document, while the user password " +
-                        "enforces only the permissions you've selected.<br>" +
-                        "Most tools use a random owner password.</font></html>"));
+                        "The owner password always grants full control over the document, while the user<br>" +
+                        "password enforces only the permissions you've selected.<br>" +
+                        "Most tools use a hidden, automatically generated owner password to prevent<br>" +
+                        "users from gaining full access.</font></html>"));
 
         compression.setSelected(true);
         allowPrinting.setSelected(true);
         saveButton.setEnabled(false);
+        saveButton.setFont(normalFont.deriveFont(Font.BOLD, normalFont.getSize2D() * 1.5f));
         browseAppendButton.setEnabled(false);
         splitDocument.setEnabled(false);
         rotation.setEditable(false);
+
 
         JLabel ownerPasswordLabel = new JLabel("Owner Password");
         ownerPasswordLabel.setLabelFor(ownerPasswordField);
@@ -154,7 +177,7 @@ public class UI extends JSplitPane {
         GridBagConstraints gcLabel = new GridBagConstraints();
         gcLabel.anchor = GridBagConstraints.NORTHWEST;
         gcLabel.fill = GridBagConstraints.NONE;
-        gcLabel.insets = new Insets(0, 0, 0, 5);
+        gcLabel.insets = new Insets(0, 0, 5, 5);
 
         GridBagConstraints gc = new GridBagConstraints();
         gc.insets = new Insets(0, 0, 5, 5);
@@ -256,16 +279,19 @@ public class UI extends JSplitPane {
 
         gc.gridx = 0;
         gc.gridy++;
-        gc.gridwidth = 3;
-        gc.fill = GridBagConstraints.HORIZONTAL;
+        gc.gridwidth = 2;
+        gc.weightx = 1;
+        gc.fill = GridBagConstraints.NONE;
+        gc.insets.top = 10;
+        gcLabel.anchor = GridBagConstraints.NORTHWEST;
         panel.add(saveButton, gc);
+        gc.insets.bottom = 5;
 
         gcLabel.gridy = gc.gridy + 1;
         gcLabel.anchor = GridBagConstraints.SOUTHWEST;
         gcLabel.weighty = 0.5;
-        gcLabel.gridwidth = 3;
+        gcLabel.gridwidth = 1;
         gcLabel.fill = GridBagConstraints.BOTH;
-        gcLabel.insets = new Insets(15, 5, 5, 5);
         panel.add(Box.createGlue(), gcLabel);
 
 
@@ -334,7 +360,7 @@ public class UI extends JSplitPane {
         JPanel documentPanel = new JPanel(new GridBagLayout());
         documentPanel.setBorder(BorderFactory.createTitledBorder("Effective Document"));
 
-        JPanel browseButtons = new JPanel(new GridLayout(2, 1, 5, 5));
+        JPanel browseButtons = new JPanel(new FlowLayout(FlowLayout.TRAILING, 5, 0));
 
         browseButton.setToolTipText("<html>Loads new document.<br>Resets the content to this file.</html>");
         browseAppendButton.setToolTipText("<html>Adds another document.</html>");
@@ -364,18 +390,129 @@ public class UI extends JSplitPane {
         gc.weightx = 1;
         documentPanel.add(pageCount, gc);
 
+        gc.gridy++;
+        gc.gridx = 0;
+        gc.gridwidth = 2;
+        gc.weightx = 1;
+        statusMessage.setFont(hintFont);
+        documentPanel.add(statusMessage, gc);
+
         gc.gridy = 0;
         gc.gridx = 2;
-        gc.gridheight = 3;
-        gc.anchor = GridBagConstraints.EAST;
+        gc.anchor = GridBagConstraints.NORTHEAST;
+        gc.gridwidth = 1;
+        gc.weighty = 0;
+        gc.weightx = 0;
+        gc.gridheight = 2;
         documentPanel.add(browseButtons, gc);
 
-        gc.gridy = 1;
-        gc.gridx = 0;
-        gc.gridheight = 2;
-        gc.gridwidth = 2;
+        gc.gridheight = 1;
         gc.anchor = GridBagConstraints.WEST;
-        documentPanel.add(statusMessage, gc);
+        gc.gridx = 0;
+        gc.gridy = 2;
+        gc.weightx = 0;
+        gc.gridwidth = 3;
+
+        JPanel docButtons = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        docButtons.add(useDocumentInformation);
+        docButtons.add(clearInformation);
+        documentPanel.add(docButtons, gc);
+
+        useDocumentInformation.setSelected(true);
+        initDocumentInformation();
+        useDocumentInformation.addChangeListener(e -> initDocumentInformation());
+
+        clearInformation.addActionListener(e -> {
+            useDocumentInformation.setSelected(false);
+
+            SwingUtilities.invokeLater(() -> {
+                // Shall work also without invokeLater.
+                // Only for the case we get some issue with checkbox change handling.
+                title.setText("");
+                author.setText("");
+                creator.setText("");
+                producer.setText("");
+                subject.setText("");
+                keywords.setText("");
+            });
+        });
+
+        gc.gridy++;
+        gc.gridwidth = 1;
+
+        JLabel titleLabel = new JLabel("Title");
+        titleLabel.setLabelFor(title);
+        documentPanel.add(titleLabel, gc);
+        gc.gridwidth = 2;
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        gc.weightx = 1;
+        gc.gridx = 1;
+        documentPanel.add(title, gc);
+
+        gc.gridwidth = 1;
+        gc.weightx = 0;
+        gc.gridx = 0;
+        gc.gridy++;
+        JLabel authorLabel = new JLabel("Author");
+        authorLabel.setLabelFor(author);
+        documentPanel.add(authorLabel, gc);
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        gc.weightx = 1;
+        gc.gridx = 1;
+        gc.gridwidth = 2;
+        documentPanel.add(author, gc);
+
+        gc.gridy++;
+        JLabel creatorLabel = new JLabel("Creator");
+        creatorLabel.setLabelFor(creator);
+        gc.weightx = 0;
+        gc.gridx = 0;
+        gc.gridy++;
+        gc.gridwidth = 1;
+        documentPanel.add(creatorLabel, gc);
+        gc.weightx = 1;
+        gc.gridx = 1;
+        gc.gridwidth = 2;
+        documentPanel.add(creator, gc);
+
+        gc.gridy++;
+        JLabel producerLabel = new JLabel("Producer");
+        producerLabel.setLabelFor(producer);
+        gc.weightx = 0;
+        gc.gridx = 0;
+        gc.gridy++;
+        gc.gridwidth = 1;
+        documentPanel.add(producerLabel, gc);
+        gc.weightx = 1;
+        gc.gridx = 1;
+        gc.gridwidth = 2;
+        documentPanel.add(producer, gc);
+
+
+        gc.gridy++;
+        JLabel subjectLabel = new JLabel("Subject");
+        subjectLabel.setLabelFor(subject);
+        gc.weightx = 0;
+        gc.gridx = 0;
+        gc.gridwidth = 1;
+        documentPanel.add(subjectLabel, gc);
+        gc.weightx = 1;
+        gc.gridx = 1;
+        gc.gridwidth = 2;
+        documentPanel.add(subject, gc);
+
+        gc.gridy++;
+        JLabel keywordsLabel = new JLabel("Keywords");
+        keywordsLabel.setLabelFor(keywords);
+        gc.weightx = 0;
+        gc.gridx = 0;
+        gc.gridwidth = 1;
+        documentPanel.add(keywordsLabel, gc);
+        gc.weightx = 1;
+        gc.gridx = 1;
+        gc.gridwidth = 2;
+        documentPanel.add(keywords, gc);
+
 
         return documentPanel;
     }
@@ -496,7 +633,13 @@ public class UI extends JSplitPane {
                 SwingUtilities.updateComponentTreeUI(mergeOptions);
                 Preferences.getInstance().set(Preferences.USER_PREF_LAF, laf);
                 help.setOpaque(false);
-                help.setIcon(UIManager.getIcon("OptionPane.informationIcon"));
+                help.setIcon(UIManager.getIcon(HELP_ICON_NAME));
+                normalFont = UIManager.getFont("Panel.font");
+                hintFont = normalFont.deriveFont(Font.ITALIC);
+                saveButton.setFont(normalFont.deriveFont(Font.BOLD, normalFont.getSize2D() * 1.5f));
+                statusMessage.setFont(hintFont);
+                setSelectedPage(selectedPage);
+                SwingUtilities.getWindowAncestor(this).pack();
                 Log.info("Switched to %s", laf);
             }
         } catch (Exception e) {
@@ -744,6 +887,7 @@ public class UI extends JSplitPane {
                     try {
                         List<PDDocument> splittedDocs = splitter.split(source);
                         for (PDDocument doc : splittedDocs) {
+                            setDocumentInformation(doc);
                             String docFile = String.format("%s%03d%s", fprefix, ++fileCount, fpostfix);
                             doc.save(docFile);
                             Log.info("Stored file '%s'", docFile);
@@ -786,8 +930,16 @@ public class UI extends JSplitPane {
                         File selectedFile = chooser.getSelectedFile();
 
                         Path selectedFilePath = selectedFile.toPath();
+
+                        String fname = selectedFilePath.getFileName().toString();
+                        int idx = fname.lastIndexOf('.');
+                        if (idx < 0) {
+                            selectedFilePath = selectedFilePath.getParent().resolve(fname + ".pdf");
+                        }
                         if (Files.exists(selectedFilePath)) {
                             if (askOverwrite(this, selectedFilePath)) {
+                                setDocumentInformation(document);
+
                                 // PdfBox can't write to the same file. Write into buffer, close original,
                                 // then re-open it.
                                 ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
@@ -797,21 +949,61 @@ public class UI extends JSplitPane {
                                 documentProxy.close();
                                 documentProxy = null;
 
-                                Files.write(selectedFile.toPath(), os.toByteArray());
+                                Files.write(selectedFilePath, os.toByteArray());
 
-                                JOptionPane.showMessageDialog(this,
-                                        "<html><font size='+1'>Stored PDF as<br><b>" + selectedFile + "</b></font></html>", "Stored", JOptionPane.INFORMATION_MESSAGE);
-                                selectPdf(selectedFile);
+                                selectPdf(selectedFilePath.toFile());
+                            } else {
+                                return;
                             }
                         } else {
-                            document.save(selectedFile);
-                            JOptionPane.showMessageDialog(this,
-                                    "<html><font size='+1'>Stored PDF as<br><b>" + selectedFile + "</b></font></html>", "Stored", JOptionPane.INFORMATION_MESSAGE);
+                            setDocumentInformation(document);
+                            document.save(selectedFilePath.toFile());
                         }
                         var prefs = Preferences.getInstance();
                         if (prefs.getBoolean(Preferences.USER_PREF_STORE_OWNER_PASSWORD, false)) {
                             prefs.set(Preferences.USER_PREF_OWNER_PASSWORD, ownerPwd);
                         }
+
+                        List<Object> options = new ArrayList<>(2);
+                        options.add("OK");
+
+                        // If supported, give buttons to browse/view the result
+                        // in the system default application (vie Desktop-support)
+                        if (Desktop.isDesktopSupported()) {
+                            try {
+                                final URI finalFile = selectedFilePath.toUri();
+                                JButton open = new JButton("Open External");
+                                open.setToolTipText("<html>Tries to open the saved file with the<br>system's default application.</html>");
+                                open.addActionListener(e -> {
+                                    try {
+                                        Desktop.getDesktop().browse(finalFile);
+                                    } catch (Exception ex) {
+                                        JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                                    }
+                                });
+                                options.add(open);
+                                final URI finalParent = selectedFilePath.getParent().toUri();
+                                JButton openDir = new JButton("Open Directory");
+                                openDir.setToolTipText("<html>Tries to open the directory with the system's<br>default application for browsing files.</html>");
+                                openDir.addActionListener(e -> {
+                                    try {
+                                        Desktop.getDesktop().browse(finalParent);
+                                    } catch (Exception ex) {
+                                        JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                                    }
+                                });
+                                options.add(openDir);
+                            } catch (Exception ignored) {
+                                // Will possibly never happen
+                                ignored.printStackTrace();
+                            }
+                        }
+
+                        JOptionPane.showOptionDialog(this,
+                                "<html><font size='+1'>Stored PDF as<p><b>" + selectedFilePath + "</b></font><p></html>", "Stored",
+                                -1,
+                                JOptionPane.INFORMATION_MESSAGE, null, options.toArray(), null);
+
                     }
                 } catch (Exception ex) {
                     JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
@@ -831,6 +1023,12 @@ public class UI extends JSplitPane {
         return (overwrite == JOptionPane.YES_OPTION);
     }
 
+    /**
+     * Gets a svg icon by name. The svg file must exist in root folder of resources.
+     *
+     * @param name The name (filename without extension)
+     * @return the icon, null if not found.
+     */
     public static Icon getIcon(String name) {
         synchronized (icons) {
             Icon i = icons.get(name);
@@ -857,11 +1055,13 @@ public class UI extends JSplitPane {
         exportImages.setEnabled(enabled);
         if (enabled) {
             pageNb.setText("Page " + page.getPageNumber());
+            pageNb.setFont(normalFont);
             quality.setText(String.format("%d dpi (x %.2f)", page.getPage().dpi, page.getScale()));
             rotation.setText(page.getPage().getRotation() + " °");
         } else {
             rotation.setText("");
-            pageNb.setText("<html><i>Select a Page</i></hml>");
+            pageNb.setText("Select a Page");
+            pageNb.setFont(hintFont);
             quality.setText("");
         }
     }
@@ -924,7 +1124,9 @@ public class UI extends JSplitPane {
                 saveButton.setEnabled(true);
                 splitDocument.setEnabled(true);
                 browseAppendButton.setEnabled(true);
-                pageCount.setText(String.format("%d", documentProxy.getPageCount()));
+
+                initDocumentInformation();
+
                 statusMessage.setText("");
             }
 
@@ -943,6 +1145,69 @@ public class UI extends JSplitPane {
         } catch (Exception e) {
             statusMessage.setText(e.getMessage());
         }
+    }
+
+    protected void setDocumentInformation(PDDocument pdDocument) {
+        PDDocumentInformation info = new PDDocumentInformation();
+
+        info.setCreationDate(Calendar.getInstance());
+        info.setModificationDate(Calendar.getInstance());
+
+        // TODO: Possibly outdated for PDF Version 2
+        info.setTitle(title.getText());
+        info.setAuthor(author.getText());
+        info.setCreator(creator.getText());
+        info.setProducer(producer.getText());
+        info.setSubject(subject.getText());
+        info.setKeywords(keywords.getText());
+
+        pdDocument.setDocumentInformation(info);
+        pdDocument.getDocumentCatalog().setMetadata(null);
+    }
+
+    protected void initDocumentInformation() {
+
+        final boolean useDoc = useDocumentInformation.isSelected();
+        final PDDocument document = documentProxy == null ? null : documentProxy.getDocument();
+        if (document != null) {
+            pageCount.setText(String.format("%d", documentProxy.getPageCount()));
+
+            if (useDoc) {
+                PDDocumentInformation info = document.getDocumentInformation();
+
+                String a = info.getTitle();
+                title.setText(a == null ? "" : a);
+                a = info.getAuthor();
+                author.setText(a == null ? "" : a);
+                a = info.getCreator();
+                creator.setText(a == null ? "" : a);
+                a = info.getProducer();
+                producer.setText(a == null ? "" : a);
+                a = info.getSubject();
+                subject.setText(a == null ? "" : a);
+                a = info.getKeywords();
+                keywords.setText(a == null ? "" : a);
+            }
+        } else {
+            pageCount.setText("");
+            if (useDoc) {
+                title.setText("");
+                author.setText("");
+                creator.setText("");
+                producer.setText("");
+                subject.setText("");
+                keywords.setText("");
+            }
+        }
+        if (title.isEditable() == useDoc) {
+            title.setEditable(!useDoc);
+            author.setEditable(!useDoc);
+            creator.setEditable(!useDoc);
+            producer.setEditable(!useDoc);
+            subject.setEditable(!useDoc);
+            keywords.setEditable(!useDoc);
+        }
+
     }
 
     protected void checkPassword() {
