@@ -83,6 +83,7 @@ public class UI extends JSplitPane {
     private final JCheckBox allowModification = new JCheckBox("Modify");
     private final JCheckBox allowFillIn = new JCheckBox("Fill Form");
     private final JCheckBox allowAssembly = new JCheckBox("Assembly");
+    private final JCheckBox allowAnnotations = new JCheckBox("Annotations");
 
     /////////////////////////////////////////////
     // Page manipulation
@@ -157,7 +158,8 @@ public class UI extends JSplitPane {
                         "The owner password always grants full control over the document, while the user<br>" +
                         "password enforces only the permissions you've selected.<br>" +
                         "Most tools use a hidden, automatically generated owner password to prevent<br>" +
-                        "users from gaining full access.</font></html>"));
+                        "users from gaining full access.<br><br>" +
+                        "Remint, that permission <i>Annotations</i> covers forms, comments and signing.</font></html>"));
 
         compression.setSelected(true);
         allowPrinting.setSelected(true);
@@ -256,14 +258,21 @@ public class UI extends JSplitPane {
         gc.gridy += 2;
         panel.add(userPasswordField, gc);
 
-        JPanel permissions = new JPanel(new GridLayout(3, 2));
+        JPanel permissions = new JPanel(new GridLayout(4, 2));
 
         permissions.add(compression);
         permissions.add(allowPrinting);
         permissions.add(allowModification);
+        permissions.add(allowAnnotations);
         permissions.add(allowExtraction);
         permissions.add(allowFillIn);
         permissions.add(allowAssembly);
+
+        allowAnnotations.addItemListener(e -> {
+            SwingUtilities.invokeLater(() -> {
+                updatePermissions();
+            });
+        });
 
         gc.weightx = 1;
         gc.gridx = 0;
@@ -308,17 +317,17 @@ public class UI extends JSplitPane {
         DocumentListener passwordChecker = new DocumentListener() {
             @Override
             public void insertUpdate(DocumentEvent e) {
-                checkPassword();
+                updatePermissions();
             }
 
             @Override
             public void removeUpdate(DocumentEvent e) {
-                checkPassword();
+                updatePermissions();
             }
 
             @Override
             public void changedUpdate(DocumentEvent e) {
-                checkPassword();
+                updatePermissions();
             }
         };
 
@@ -342,7 +351,7 @@ public class UI extends JSplitPane {
         setRightComponent(scrollPane);
 
         setDividerLocation(charWith * 65);
-        checkPassword();
+        updatePermissions();
         setSelectedPage(null);
 
         pages.addComponentListener(new ComponentAdapter() {
@@ -420,7 +429,7 @@ public class UI extends JSplitPane {
 
         useDocumentInformation.setSelected(true);
         initDocumentInformation();
-        useDocumentInformation.addChangeListener(e -> initDocumentInformation());
+        useDocumentInformation.addItemListener(e -> initDocumentInformation());
 
         clearInformation.addActionListener(e -> {
             useDocumentInformation.setSelected(false);
@@ -909,6 +918,8 @@ public class UI extends JSplitPane {
         String ownerPwd = ownerPasswordField.getText().trim();
         String userPwd = userPasswordField.getText().trim();
 
+        statusMessage.setText("");
+
         if (documentProxy != null) {
             PDDocument document = documentProxy.getDocument();
             if (document != null) {
@@ -917,8 +928,10 @@ public class UI extends JSplitPane {
                     ap.setCanPrint(allowPrinting.isSelected());
                     ap.setCanModify(allowModification.isSelected());
                     ap.setCanExtractContent(allowExtraction.isSelected());
+                    ap.setCanExtractForAccessibility(allowExtraction.isSelected());
                     ap.setCanFillInForm(allowFillIn.isSelected());
                     ap.setCanAssembleDocument(allowAssembly.isSelected());
+                    ap.setCanModifyAnnotations(allowAnnotations.isSelected());
 
                     StandardProtectionPolicy spp = new StandardProtectionPolicy(ownerPwd, userPwd, ap);
                     spp.setEncryptionKeyLength(128);
@@ -1007,6 +1020,9 @@ public class UI extends JSplitPane {
                     }
                 } catch (Exception ex) {
                     JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    if (documentProxy == null)
+                        selectPdf(null);
                 }
             }
         }
@@ -1103,47 +1119,59 @@ public class UI extends JSplitPane {
      * Select a pdf file for preview and processing.
      */
     protected void selectPdf(File selectedFile) {
-        selectedFile = selectedFile.getAbsoluteFile();
-        String parent = selectedFile.getParent();
-        if (parent != null)
-            Preferences.getInstance().set(Preferences.USER_PREF_LAST_PDF_DIR, parent);
+        if (selectedFile != null) {
+            selectedFile = selectedFile.getAbsoluteFile();
+            String parent = selectedFile.getParent();
+            if (parent != null)
+                Preferences.getInstance().set(Preferences.USER_PREF_LAST_PDF_DIR, parent);
+        }
         if (documentProxy != null) {
             documentProxy.close();
         }
+        documentProxy = null;
         pages.clear();
 
-        documentProxy = new DocumentProxy(renderQueue);
-        documentProxy.setOwnerPassword(ownerPasswordField.getText());
+        if (selectedFile != null) {
+            documentProxy = new DocumentProxy(renderQueue);
+            documentProxy.setOwnerPassword(ownerPasswordField.getText());
 
-        documentProxy.addDocumentConsumer(new DocumentProxy.DocumentConsumer() {
+            documentProxy.addDocumentConsumer(new DocumentProxy.DocumentConsumer() {
 
-            @Override
-            public void documentLoaded(PDDocument document) {
-                // This method is called each time some file wasloaded.
-                // "document" is always the main effective document.
-                saveButton.setEnabled(true);
-                splitDocument.setEnabled(true);
-                browseAppendButton.setEnabled(true);
+                @Override
+                public void documentLoaded(PDDocument document) {
+                    // This method is called each time some file wasloaded.
+                    // "document" is always the main effective document.
 
-                initDocumentInformation();
+                    saveButton.setEnabled(true);
+                    splitDocument.setEnabled(true);
+                    browseAppendButton.setEnabled(true);
 
-                statusMessage.setText("");
+                    initDocumentInformation();
+
+                    statusMessage.setText("");
+                }
+
+                @Override
+                public void failed(String error) {
+                    if (documentProxy == null)
+                        // Force initialisation for case where loading the main file failed.
+                        selectPdf(null);
+                    statusMessage.setText(error == null ? "" : error);
+                }
+            });
+            pages.setDocument(documentProxy);
+            try {
+                documentProxy.load(selectedFile.toPath(), new MergeOptions());
+            } catch (Exception e) {
+                statusMessage.setText(e.getMessage());
+                selectPdf(null);
             }
+        } else {
+            initDocumentInformation();
 
-            @Override
-            public void failed(String error) {
-                saveButton.setEnabled(false);
-                splitDocument.setEnabled(false);
-                browseAppendButton.setEnabled(false);
-                documentProxy = null;
-                statusMessage.setText(error == null ? "" : error);
-            }
-        });
-        pages.setDocument(documentProxy);
-        try {
-            documentProxy.load(selectedFile.toPath(), new MergeOptions());
-        } catch (Exception e) {
-            statusMessage.setText(e.getMessage());
+            saveButton.setEnabled(false);
+            splitDocument.setEnabled(false);
+            browseAppendButton.setEnabled(false);
         }
     }
 
@@ -1210,15 +1238,16 @@ public class UI extends JSplitPane {
 
     }
 
-    protected void checkPassword() {
+
+    protected void updatePermissions() {
         boolean rightsPossible =
                 !(ownerPasswordField.getText().trim().isEmpty() || userPasswordField.getText().trim().isEmpty());
-
         allowPrinting.setEnabled(rightsPossible);
         allowExtraction.setEnabled(rightsPossible);
         allowModification.setEnabled(rightsPossible);
-        allowFillIn.setEnabled(rightsPossible);
+        allowFillIn.setEnabled(rightsPossible && !allowAnnotations.isSelected());
         allowAssembly.setEnabled(rightsPossible);
+        allowAnnotations.setEnabled(rightsPossible);
     }
 
     public static JFileChooser getImageChooser() {
