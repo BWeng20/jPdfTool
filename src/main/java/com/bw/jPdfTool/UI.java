@@ -3,6 +3,7 @@ package com.bw.jPdfTool;
 import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.model.MergeOptions;
 import com.bw.jPdfTool.model.Page;
+import com.bw.jPdfTool.toast.Toaster;
 import com.bw.jtools.svg.SVGConverter;
 import com.bw.jtools.ui.ShapeIcon;
 import com.formdev.flatlaf.FlatLaf;
@@ -43,6 +44,8 @@ public class UI extends JSplitPane {
     private static final Map<String, Icon> icons = new HashMap<>();
 
     private int encryptionKeyLength = 256;
+
+    private final Toaster toaster = new Toaster();
 
     protected static JFileChooser savePdfChooser;
     protected static JFileChooser pdfChooser;
@@ -363,6 +366,10 @@ public class UI extends JSplitPane {
             }
         });
         renderQueue.start();
+
+        SwingUtilities.invokeLater(() ->
+                toaster.attachFrame((JFrame) SwingUtilities.getWindowAncestor(this))
+        );
     }
 
     protected JPanel createDocumentPanel() {
@@ -634,6 +641,10 @@ public class UI extends JSplitPane {
             "Rendering for quality", Preferences.USER_PREF_VIEWER_RENDER_QUALITY, false, true);
 
     private JMenuBar menuBar;
+
+    public static boolean isFlatLaf() {
+        return UIManager.getLookAndFeel() instanceof FlatLaf;
+    }
 
     protected void setLaf(String laf) {
         try {
@@ -1042,6 +1053,7 @@ public class UI extends JSplitPane {
                         }
                     }
 
+                    toaster.toast("<html>Stored as<br><font size='+1'><i>%s</i></font></html>", selectedFilePath.getFileName());
                     JOptionPane.showOptionDialog(this,
                             "<html><font size='+1'>Stored PDF as<p><b>" + selectedFilePath + "</b></font><p></html>", "Stored",
                             JOptionPane.DEFAULT_OPTION,
@@ -1118,6 +1130,7 @@ public class UI extends JSplitPane {
                 Preferences.getInstance().set(Preferences.USER_PREF_LAST_PDF_DIR, parent);
 
             documentProxy.setOwnerPassword(ownerPasswordField.getText());
+            toaster.toast("<html>Appending<br>%s</html>", file);
             documentProxy.load(file.toPath(), mo);
         }
     }
@@ -1188,6 +1201,7 @@ public class UI extends JSplitPane {
             });
             pages.setDocument(documentProxy);
             try {
+                toaster.toast("<html>Loading %s</html>", selectedFile);
                 documentProxy.load(selectedFile.toPath(), new MergeOptions());
             } catch (Exception e) {
                 statusMessage.setText(e.getMessage());

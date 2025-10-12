@@ -51,6 +51,7 @@ public class Main {
             System.err.println("Failed to set LAF " + lafClassName);
         }
 
+        UIManager.put("Panel.arc", 8);
         UI ui = new UI();
 
         mainWindow = new JFrame("PDF Passwords & Rights");
