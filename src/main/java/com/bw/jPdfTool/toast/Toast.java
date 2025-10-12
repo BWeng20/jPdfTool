@@ -31,6 +31,8 @@ public class Toast extends JPanel {
     public final ToastType type;
     protected final JLabel label = new JLabel();
 
+    protected JEditorPane textArea;
+
 
     /**
      * EditorKit inheritance to enable also one-char paragraphs that will enable the kit to break inside words.
@@ -43,15 +45,15 @@ public class Toast extends JPanel {
             return new HTMLFactory() {
                 public View create(Element e) {
                     View v = super.create(e);
-                    if (v instanceof ParagraphView) {
-                        return new ParagraphView(e) {
+                    if (v instanceof ParagraphView pv) {
+                        javax.swing.text.html.ParagraphView pvExtended = new javax.swing.text.html.ParagraphView(e) {
                             protected SizeRequirements calculateMinorAxisRequirements(int axis, SizeRequirements r) {
                                 SizeRequirements rs = super.calculateMinorAxisRequirements(axis, r);
-                                rs.minimum = 8;
+                                rs.minimum = 20;
                                 return rs;
                             }
-
                         };
+                        v = pvExtended;
                     }
                     return v;
                 }
@@ -88,6 +90,11 @@ public class Toast extends JPanel {
         }
     }
 
+    public void setMessage(String message) {
+        textArea.setText(message);
+    }
+
+
     /**
      * Initialize a new toast message.
      *
@@ -96,7 +103,7 @@ public class Toast extends JPanel {
      * @param onClose The callback to be triggered if the toast should close.
      * @param width   The desired width of the message box. Height is calculated to fit the message text.
      */
-    public Toast(String message, ToastType type, Runnable onClose, int width) {
+    public Toast(ToastType type, int durationMS, String message, Runnable onClose, int width) {
         setLayout(new GridBagLayout());
         this.type = type;
         setToastBorder();
@@ -114,7 +121,7 @@ public class Toast extends JPanel {
 
             });
             // Auto-close after 5 seconds
-            closeTimer = new Timer(Toaster.closeDelayMS, e -> {
+            closeTimer = new Timer(durationMS, e -> {
                 if (this.closeTimer != null) {
                     onClose.run();
                 }
@@ -122,7 +129,7 @@ public class Toast extends JPanel {
             closeTimer.start();
         }
 
-        JEditorPane textArea = new JEditorPane();
+        textArea = new JEditorPane();
         textArea.setEditorKit(new HTMLEditorKitWrapSupport());
         textArea.setText(message);
 
@@ -137,16 +144,38 @@ public class Toast extends JPanel {
         gc.anchor = GridBagConstraints.LINE_START;
         gc.weightx = 0;
         label.setBackground(Color.RED);
+        gc.gridheight = 2;
         add(label, gc);
         gc.gridx = 1;
         gc.weightx = 1;
         gc.weighty = 0;
         add(textArea, gc);
         gc.gridx = 2;
+        gc.gridheight = 1;
         gc.anchor = GridBagConstraints.NORTHEAST;
         gc.weightx = 0;
         gc.weighty = 0;
         add(close, gc);
+
+        JButton openDialog = new JButton(UI.getIcon("openToast"));
+        openDialog.setBorderPainted(false);
+        openDialog.setContentAreaFilled(false);
+        openDialog.setBorder(null);
+        gc.gridy = 1;
+        gc.anchor = GridBagConstraints.SOUTHEAST;
+        add(openDialog, gc);
+
+        openDialog.addActionListener(e -> {
+            int optype = switch (type) {
+                case INFO -> JOptionPane.INFORMATION_MESSAGE;
+                case WARNING -> JOptionPane.WARNING_MESSAGE;
+                case ERROR -> JOptionPane.ERROR_MESSAGE;
+                case SUCCESS -> JOptionPane.INFORMATION_MESSAGE;
+            };
+
+            JOptionPane.showMessageDialog(this, new JLabel(textArea.getText()),
+                    null, optype);
+        });
 
         // Find the height for the fixed width
         setSize(new Dimension(width, 500));
@@ -182,10 +211,8 @@ public class Toast extends JPanel {
                         t = (Toast) SwingUtilities.getAncestorOfClass(Toast.class, component);
                     if (t != null) {
                         if (id == MouseEvent.MOUSE_ENTERED) {
-                            System.out.println(" STOP");
                             t.closeTimer.stop();
                         } else {
-                            System.out.println(" START");
                             t.closeTimer.start();
                         }
                     }

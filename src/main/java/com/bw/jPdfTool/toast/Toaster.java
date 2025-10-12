@@ -53,24 +53,41 @@ public class Toaster {
     /**
      * Shows a toast.
      *
-     * @param message   The message (should be html). Will be used with "format" if arguments are not empty.
-     * @param arguments The arguments for the "format" call.
+     * @param type       The type of toast.
+     * @param durationMS The time (in milliseconds) to stay on screen.
+     * @param message    The message (should be html). Will be used with "format" if arguments are not empty.
+     * @param arguments  The arguments for the "format" call.
      */
-    public void toast(String message, Object... arguments) {
+    public Toast toast(ToastType type, int durationMS, String message, Object... arguments) {
         if (layeredPane != null) {
             final Toast[] toasts = new Toast[1];
 
             if (arguments.length > 0)
                 message = String.format(message, arguments);
 
-            toasts[0] = new Toast(message, ToastType.INFO, () -> removeNotification(toasts[0]), 300);
+            toasts[0] = new Toast(type, durationMS, message, () -> removeNotification(toasts[0]), 300);
             layeredPane.add(toasts[0], JLayeredPane.POPUP_LAYER);
             bread.add(0, toasts[0]);
             SwingUtilities.invokeLater(() -> {
                 animateFadeIn(toasts[0]);
                 layeredPane.repaint();
             });
+
+            return toasts[0];
+        } else {
+            return null;
         }
+    }
+
+
+    /**
+     * Shows an informative toast.
+     *
+     * @param message   The message (should be html). Will be used with "format" if arguments are not empty.
+     * @param arguments The arguments for the "format" call.
+     */
+    public Toast toast(String message, Object... arguments) {
+        return toast(ToastType.INFO, Toaster.closeDelayMS, message, arguments);
     }
 
 

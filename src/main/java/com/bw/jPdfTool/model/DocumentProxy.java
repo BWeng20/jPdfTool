@@ -21,6 +21,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Simple proxy for lazy asynchronous handling of the pdf documents.
@@ -49,10 +50,10 @@ public class DocumentProxy {
     /**
      * Triggers loading of the document in background
      */
-    public synchronized void load(Path file, MergeOptions mo) {
+    public synchronized void load(Path file, MergeOptions mo, Consumer<PDDocument> r) {
         ensuredNotClosed();
         synchronized (this) {
-            PdfLoadWorker lw = new PdfLoadWorker(file, mo);
+            PdfLoadWorker lw = new PdfLoadWorker(file, mo, r);
             loadWorker.addLast(lw);
             startNextLoader();
         }
@@ -91,7 +92,7 @@ public class DocumentProxy {
     /**
      * Helper to request the owner password from user.
      */
-    protected void requestOwnerPassword(Path file, MergeOptions mo) {
+    protected void requestOwnerPassword(Path file, MergeOptions mo, Consumer<PDDocument> consumer) {
         SwingUtilities.invokeLater(() -> {
             Object[] message = {"Enter Owner Password:", passwordField};
             int option = JOptionPane.showConfirmDialog(
@@ -102,7 +103,7 @@ public class DocumentProxy {
             if (option == JOptionPane.OK_OPTION) {
                 owerPassword4Load = new String(passwordField.getPassword());
                 // retry
-                loadWorker.add(new PdfLoadWorker(file, mo));
+                loadWorker.add(new PdfLoadWorker(file, mo, consumer));
                 startNextLoader();
             } else {
                 error = "File is protected.\nPassword needed.";
@@ -432,10 +433,12 @@ public class DocumentProxy {
         protected boolean passwordNeeded = false;
         protected final Path file;
         protected final MergeOptions mo;
+        protected Consumer<PDDocument> consumer;
 
-        public PdfLoadWorker(Path file, MergeOptions mo) {
+        public PdfLoadWorker(Path file, MergeOptions mo, Consumer<PDDocument> consumer) {
             this.file = file;
             this.mo = mo;
+            this.consumer = consumer;
         }
 
         @Override
@@ -472,9 +475,12 @@ public class DocumentProxy {
                     PDDocument document = get();
                     if (!DocumentProxy.this.closed) {
                         if (passwordNeeded) {
-                            requestOwnerPassword(file, mo);
+                            requestOwnerPassword(file, mo, consumer);
                         } else {
                             if (document != null) {
+                                if (consumer != null)
+                                    consumer.accept(document);
+
                                 int pageCount;
                                 if (DocumentProxy.this.document == null) {
                                     DocumentProxy.this.document = document;

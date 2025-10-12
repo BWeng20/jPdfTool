@@ -3,6 +3,8 @@ package com.bw.jPdfTool;
 import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.model.MergeOptions;
 import com.bw.jPdfTool.model.Page;
+import com.bw.jPdfTool.toast.Toast;
+import com.bw.jPdfTool.toast.ToastType;
 import com.bw.jPdfTool.toast.Toaster;
 import com.bw.jtools.svg.SVGConverter;
 import com.bw.jtools.ui.ShapeIcon;
@@ -655,6 +657,8 @@ public class UI extends JSplitPane {
                     SwingUtilities.updateComponentTreeUI(pdfChooser);
                 if (imageChooser != null)
                     SwingUtilities.updateComponentTreeUI(imageChooser);
+                if (savePdfChooser != null)
+                    SwingUtilities.updateComponentTreeUI(savePdfChooser);
                 SwingUtilities.updateComponentTreeUI(mergeOptions);
                 Preferences.getInstance().set(Preferences.USER_PREF_LAF, laf);
                 help.setOpaque(false);
@@ -1053,7 +1057,7 @@ public class UI extends JSplitPane {
                         }
                     }
 
-                    toaster.toast("<html>Stored as<br><font size='+1'><i>%s</i></font></html>", selectedFilePath.getFileName());
+                    // toaster.toast("<html>Stored as<br><font size='+1'><i>%s</i></font></html>", selectedFilePath.getFileName());
                     JOptionPane.showOptionDialog(this,
                             "<html><font size='+1'>Stored PDF as<p><b>" + selectedFilePath + "</b></font><p></html>", "Stored",
                             JOptionPane.DEFAULT_OPTION,
@@ -1062,7 +1066,8 @@ public class UI extends JSplitPane {
 
                 }
             } catch (Exception ex) {
-                JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                toaster.toast(ToastType.ERROR, 30000, "<html><font size='+2'>Error</font><br><font size='+1'><i>%s</i></font></html>", ex.getMessage());
+                // JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
     }
@@ -1130,8 +1135,15 @@ public class UI extends JSplitPane {
                 Preferences.getInstance().set(Preferences.USER_PREF_LAST_PDF_DIR, parent);
 
             documentProxy.setOwnerPassword(ownerPasswordField.getText());
-            toaster.toast("<html>Appending<br>%s</html>", file);
-            documentProxy.load(file.toPath(), mo);
+            final String fileName = file.getName();
+            Toast toast = toaster.toast("<html><b>Appending…</b><br>%s</html>", fileName);
+            long start = System.currentTimeMillis();
+            documentProxy.load(file.toPath(), mo, document -> {
+                if (toast != null)
+                    toast.setMessage(String.format("<html><b>Appended (%d ms):</b><br>%s</html>",
+                            System.currentTimeMillis() - start,
+                            fileName));
+            });
         }
     }
 
@@ -1201,8 +1213,14 @@ public class UI extends JSplitPane {
             });
             pages.setDocument(documentProxy);
             try {
-                toaster.toast("<html>Loading %s</html>", selectedFile);
-                documentProxy.load(selectedFile.toPath(), new MergeOptions());
+                final String fileName = selectedFile.getName();
+                Toast toast = toaster.toast("<html><b>Loading…</b><br><font size='+1'>%s</font></html>", fileName);
+                long start = System.currentTimeMillis();
+                documentProxy.load(selectedFile.toPath(), new MergeOptions(), document -> {
+                    if (toast != null)
+                        toast.setMessage(String.format("<html><b>Loaded (%d ms):</b><br>%s</html>",
+                                System.currentTimeMillis() - start, fileName));
+                });
             } catch (Exception e) {
                 statusMessage.setText(e.getMessage());
                 selectPdf(null);
