@@ -7,6 +7,9 @@ import java.awt.event.ComponentEvent;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Manages Toast messages.
+ */
 public class Toaster {
 
     private JLayeredPane layeredPane;
@@ -15,13 +18,29 @@ public class Toaster {
     public static int HORIZONTAL_GAP = 5;
     public static int VERTICAL_GAP = 5;
 
+    /**
+     * Milliseconds a toast should be shown on screen.
+     * If user is hovering with the mouse over a toast, it is not automatically closed.
+     */
     public static int closeDelayMS = 5000;
 
 
+    /**
+     * Initialize a new instance. Each frame should have its own instance.
+     * The owning frame must call {@link Toaster#attachFrame(JFrame)}.
+     */
     public Toaster() {
     }
 
+    /**
+     * Attacks the toaster to a frame. The toasts will be shown on the layered-pane of the frame.<br>
+     * This can be done only once for each Toaster instance.
+     *
+     * @param frame The frame to attach to.
+     */
     public void attachFrame(JFrame frame) {
+        if (layeredPane != null)
+            throw new IllegalStateException("Toaster is already attached to a frame");
         layeredPane = frame.getLayeredPane();
         frame.addComponentListener(new ComponentAdapter() {
             @Override
@@ -29,9 +48,14 @@ public class Toaster {
                 repositionPanels();
             }
         });
-
     }
 
+    /**
+     * Shows a toast.
+     *
+     * @param message   The message (should be html). Will be used with "format" if arguments are not empty.
+     * @param arguments The arguments for the "format" call.
+     */
     public void toast(String message, Object... arguments) {
         if (layeredPane != null) {
             final Toast[] toasts = new Toast[1];
@@ -62,7 +86,6 @@ public class Toaster {
         repositionPanels();
         layeredPane.repaint();
     }
-
 
     private void animateMove(Toast toast, int x, int y) {
         Point c = toast.getLocation();
