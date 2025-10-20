@@ -957,9 +957,11 @@ public class UI extends JSplitPane {
                             Log.info("Stored file '%s'", docFile);
                             doc.close();
                         }
+                        toaster.toast(ToastType.SUCCESS, 5000, "<html>Spitted to <br><font size='+1'>%s<i> [ 001 .. %03d ]%s</i></font></html>",
+                                fname, fileCount, fpostfix);
                     } catch (IOException e) {
-                        JOptionPane.showMessageDialog(this, e.getMessage(),
-                                "PDF Error", JOptionPane.ERROR_MESSAGE);
+                        toaster.toast(ToastType.ERROR, 20000,
+                                "<html><font size='+2'>PDF Error</font><br><font size='+1'><i>%s</i></font></html>", e.getMessage());
                     }
                 }
             }
@@ -1066,7 +1068,7 @@ public class UI extends JSplitPane {
 
                 }
             } catch (Exception ex) {
-                toaster.toast(ToastType.ERROR, 30000, "<html><font size='+2'>Error</font><br><font size='+1'><i>%s</i></font></html>", ex.getMessage());
+                toaster.toast(ToastType.ERROR, 20000, "<html><font size='+2'>Error</font><br><font size='+1'><i>%s</i></font></html>", ex.getMessage());
                 // JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
