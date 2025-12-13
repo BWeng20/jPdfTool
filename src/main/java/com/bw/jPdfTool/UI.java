@@ -120,6 +120,27 @@ public class UI extends JSplitPane {
 
     protected final RenderQueue renderQueue = new RenderQueue();
 
+    public void handleDrop(DropTargetDropEvent dtde, boolean append) {
+        try {
+            dtde.acceptDrop(DnDConstants.ACTION_COPY_OR_MOVE);
+            if (dtde.getTransferable().getTransferData(DataFlavor.javaFileListFlavor) instanceof java.util.List<?> droppedFiles) {
+                for (Object item : droppedFiles) {
+                    if (item instanceof File file) {
+                        if (append && documentProxy != null) {
+                            appendPdf(file, new MergeOptions());
+                        } else {
+                            selectPdf(file);
+                            append = true;
+                        }
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace(System.err);
+        }
+
+    }
+
     public UI() {
         super(JSplitPane.HORIZONTAL_SPLIT);
 
@@ -128,30 +149,6 @@ public class UI extends JSplitPane {
         final FontMetrics fm = getFontMetrics(normalFont);
         final int charWith = fm.charWidth('W');
 
-        new DropTarget(this, new DropTargetAdapter() {
-
-            @Override
-            public void drop(DropTargetDropEvent dtde) {
-                try {
-                    dtde.acceptDrop(DnDConstants.ACTION_COPY_OR_MOVE);
-                    if (dtde.getTransferable().getTransferData(DataFlavor.javaFileListFlavor) instanceof java.util.List<?> droppedFiles) {
-                        boolean append = dtde.getDropAction() == DnDConstants.ACTION_COPY;
-                        for (Object item : droppedFiles) {
-                            if (item instanceof File file) {
-                                if (append && documentProxy != null) {
-                                    appendPdf(file, new MergeOptions());
-                                } else {
-                                    selectPdf(file);
-                                    append = true;
-                                }
-                            }
-                        }
-                    }
-                } catch (Exception ex) {
-                    ex.printStackTrace(System.err);
-                }
-            }
-        });
 
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 5));
@@ -380,8 +377,22 @@ public class UI extends JSplitPane {
 
         JPanel browseButtons = new JPanel(new FlowLayout(FlowLayout.TRAILING, 5, 0));
 
-        browseButton.setToolTipText("<html>Loads new document.<br>Resets the content to this file.</html>");
-        browseAppendButton.setToolTipText("<html>Adds another document.</html>");
+        browseButton.setToolTipText("<html>Loads new document.<br>Resets the content to this file.<br>You can also drag some file(s) here.</html>");
+        new DropTarget(browseButton, new DropTargetAdapter() {
+            @Override
+            public void drop(DropTargetDropEvent dtde) {
+                handleDrop(dtde, false);
+            }
+        });
+
+        browseAppendButton.setToolTipText("<html>Adds another document.<br>You can also drag some file(s) here.</html>");
+        new DropTarget(browseAppendButton, new DropTargetAdapter() {
+            @Override
+            public void drop(DropTargetDropEvent dtde) {
+                handleDrop(dtde, true);
+            }
+        });
+
         browseButton.setOpaque(false);
         browseAppendButton.setOpaque(false);
 
