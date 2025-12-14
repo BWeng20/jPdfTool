@@ -421,6 +421,7 @@ public class DocumentProxy {
      */
     public PDDocument getCopy() throws IOException {
         if (document != null) {
+            document.setAllSecurityToBeRemoved(true);
             ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
             document.save(os, CompressParameters.NO_COMPRESSION);
             return Loader.loadPDF(os.toByteArray());

@@ -16,6 +16,16 @@ public class Preferences {
     public final static String USER_PREF_SIG_PASSWORD = "sig-key-password";
 
     /**
+     * User preferences key for the signature key file.
+     */
+    public final static String USER_PREF_SIG_FILE = "sig-key-file";
+
+    /**
+     * User preferences key for the signature flag.
+     */
+    public final static String USER_PREF_SIG_ENABLED = "sig";
+
+    /**
      * User preferences key for the last PDF directory the user selected.
      */
     public final static String USER_PREF_LAST_PDF_DIR = "last-dir";
@@ -31,9 +41,9 @@ public class Preferences {
     public final static String USER_PREF_LAF = "laf";
 
     /**
-     * User preferences key for the owner password option.
+     * User preferences key for the password option.
      */
-    public final static String USER_PREF_STORE_OWNER_PASSWORD = "store-owner-password";
+    public final static String USER_PREF_STORE_PASSWORDS = "store-passwords";
 
     /**
      * User preferences key for the Encryption Key Length.
@@ -56,6 +66,11 @@ public class Preferences {
      * User preferences key for the owner password (if option is enabled).
      */
     public final static String USER_PREF_OWNER_PASSWORD = "ownerpassword";
+
+    /**
+     * User preferences key for the user password (if option is enabled).
+     */
+    public final static String USER_PREF_USER_PASSWORD = "userpassword";
 
     public final static String LAF_DARK_CLASSNAME = "com.formdev.flatlaf.FlatDarkLaf";
     public final static String LAF_LIGHT_CLASSNAME = "com.formdev.flatlaf.FlatLightLaf";

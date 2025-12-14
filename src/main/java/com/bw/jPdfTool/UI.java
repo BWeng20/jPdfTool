@@ -9,7 +9,9 @@ import com.bw.jPdfTool.toast.Toaster;
 import com.bw.jtools.svg.SVGConverter;
 import com.bw.jtools.ui.ShapeIcon;
 import com.formdev.flatlaf.FlatLaf;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.multipdf.Splitter;
+import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
@@ -28,12 +30,11 @@ import java.awt.dnd.DropTargetDropEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.List;
 
@@ -86,7 +87,7 @@ public class UI extends JSplitPane {
     private final JCheckBox sign = new JCheckBox("Sign it");
     private final JLabel signatureKeyFileName = new JLabel();
     private File signatureKeyFile;
-    private final JTextField signaturePasswordField = new JTextField();
+    private final JPasswordField signaturePasswordField = new JPasswordField();
 
 
     /////////////////////////////////////////////
@@ -117,7 +118,8 @@ public class UI extends JSplitPane {
 
     private final String HELP_ICON_NAME = "OptionPane.questionIcon";
 
-    private final JButton help = new JButton(UIManager.getIcon(HELP_ICON_NAME));
+    private final JButton permissionHelp = new JButton(UIManager.getIcon(HELP_ICON_NAME));
+    private final JButton signingHelp = new JButton(UIManager.getIcon(HELP_ICON_NAME));
 
     private Font normalFont;
     private Font hintFont;
@@ -266,8 +268,13 @@ public class UI extends JSplitPane {
         });
         renderQueue.start();
 
-        SwingUtilities.invokeLater(() ->
-                toaster.attachFrame((JFrame) SwingUtilities.getWindowAncestor(this))
+        SwingUtilities.invokeLater(() -> {
+                    toaster.attachFrame((JFrame) SwingUtilities.getWindowAncestor(this));
+
+                    String sigFile = getPref(Preferences.USER_PREF_SIG_FILE, null);
+                    if (sigFile != null)
+                        loadSignature(new File(sigFile));
+                }
         );
     }
 
@@ -287,7 +294,7 @@ public class UI extends JSplitPane {
         JPanel signButtons = new JPanel(new GridBagLayout());
 
         signButtons.add(sign, gc);
-        JButton browseSignature = new JButton("Select Key");
+        JButton browseSignature = new JButton("Select P12 File");
         browseSignature.addActionListener(e -> doBrowseSignatureFile());
         gc.gridx = 1;
         gc.fill = GridBagConstraints.HORIZONTAL;
@@ -305,7 +312,7 @@ public class UI extends JSplitPane {
         JLabel label = new JLabel("Key File");
         panel.add(label, gc);
         gc.gridy++;
-        label = new JLabel("Password" );
+        label = new JLabel("Password");
         label.setLabelFor(signaturePasswordField);
         panel.add(label, gc);
 
@@ -316,26 +323,65 @@ public class UI extends JSplitPane {
         panel.add(signatureKeyFileName, gc);
         gc.gridy++;
 
-        signaturePasswordField.setText(getPref( Preferences.USER_PREF_SIG_PASSWORD, "" ));
-
+        signaturePasswordField.setText(getPref(Preferences.USER_PREF_SIG_PASSWORD, ""));
         panel.add(signaturePasswordField, gc);
 
+        signingHelp.addActionListener(e -> JOptionPane.showMessageDialog(this,
+                "<html><font size='+2'><b>How to Sign a PDF</b></font><br><br>" +
+                        "<font size='+1'>" +
+                        "Signing requires a <b>P12 key file</b> which contain a <b>X.509 certificate</b><br>with the following components:<br>" +
+                        "<ul>" +
+                        "<li><b>Private Key:</b> This is essential to generate the digital signature." +
+                        "<br>It proves your identity.</li>" +
+                        "<li><b>Certificate Chain:</b> This is a series of certificates that links your<br>" +
+                        "certificate back to a trusted Root Certificate Authority (CA).</li>" +
+                        "<li><b>Common Name (CN):</b> This attribute is used to identify the signer and<br>" +
+                        "is typically displayed as the signer's name in the viewer.</li>" +
+                        "</ul><br>" +
+                        "For your signature to be accepted by the recipient's system, the certificate<br>" +
+                        "chain must ultimately be based on a Root Certificate Authority (CA) that is<br>" +
+                        "already installed and trusted by the target system.<br><br>" +
+                        "<b>Options for Certificates:</b>" +
+                        "<ul><li><b>Purchased Certificates:</b><br>" +
+                        "You can buy certificates from commercial CAs (like DigiCert, Comodo, etc.)<br>" +
+                        "whose roots are widely trusted.</li><br>" +
+                        "<li><b>Self-Signed Certificates</b>:<br>" +
+                        "You can create your own.<br>" +
+                        "However, for these signatures to be verified, you must distribute the public<br>" +
+                        "part of your self-signed certificate to the people you are sharing the PDF with,<br>" +
+                        "and they must manually add it to their list of trusted identities.<br>" +
+                        "</font></html>", "Help", JOptionPane.INFORMATION_MESSAGE));
+
+        gc.fill = GridBagConstraints.NONE;
+        gc.anchor = GridBagConstraints.NORTHEAST;
+        gc.gridy++;
+        panel.add(signingHelp, gc);
+
+
+        gc.anchor = GridBagConstraints.NORTHWEST;
         gc.fill = GridBagConstraints.BOTH;
         gc.gridwidth = 2;
-        gc.weighty= 1;
+        gc.weighty = 1;
         gc.gridx = 0;
         gc.gridy++;
         panel.add(Box.createGlue(), gc);
 
-
         panel.setBorder(BorderFactory.createTitledBorder("Signing"));
+
+        Preferences prefs = Preferences.getInstance();
+
+        this.signaturePasswordField.setText(prefs.getString(Preferences.USER_PREF_SIG_PASSWORD, ""));
+        this.sign.setSelected(prefs.getBoolean(Preferences.USER_PREF_SIG_ENABLED, false));
+
+        this.sign.addActionListener(e -> Preferences.getInstance().set(Preferences.USER_PREF_SIG_ENABLED, this.sign.isSelected()));
+
         return panel;
     }
 
     protected JPanel createPermissionsPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
 
-        help.addActionListener(e -> JOptionPane.showMessageDialog(this,
+        permissionHelp.addActionListener(e -> JOptionPane.showMessageDialog(this,
                 "<html><font size='+2'><b>How to set PDF Permissions</b></font><br>" +
                         "<font size='+1'>" +
                         "To prevent unauthorized access to a PDF, you only need to set a <b>user password</b>.<br>" +
@@ -351,7 +397,8 @@ public class UI extends JSplitPane {
                         "If you use the same password for both the user and owner passwords, the restrictions will<br>" +
                         "have no effect, as the single entered password will satisfy the <b>owner password</b> requirement,<br>" +
                         "thereby unlocking the document with full owner rights.<br><br>" +
-                        "<b>Reminder:</b> The <i>Annotations</i> permission covers forms, comments, and signing.</font></html>"));
+                        "<b>Reminder:</b> The <i>Annotations</i> permission covers forms, comments, and signing.</font></html>",
+                "Help", JOptionPane.INFORMATION_MESSAGE));
 
         JButton generateOwner = new JButton("<html><body>Generate<br>Owner Password</body></html>");
         compression.setSelected(true);
@@ -421,14 +468,17 @@ public class UI extends JSplitPane {
         gc.gridx = 1;
         gc.weightx = 0;
         gc.fill = GridBagConstraints.NONE;
-        panel.add(help, gc);
+        panel.add(permissionHelp, gc);
 
         allowAnnotations.addItemListener(e -> SwingUtilities.invokeLater(this::updatePermissions));
         String ownerPassword = null;
 
+        Preferences prefs = Preferences.getInstance();
         generateOwner.addActionListener(e -> ownerPasswordField.setText(UUID.randomUUID().toString()));
-        if (Preferences.getInstance().getBoolean(Preferences.USER_PREF_STORE_OWNER_PASSWORD, false)) {
-            ownerPassword = Preferences.getInstance().getString(Preferences.USER_PREF_OWNER_PASSWORD, null);
+        if (prefs.getBoolean(Preferences.USER_PREF_STORE_PASSWORDS, false)) {
+            ownerPassword = prefs.getString(Preferences.USER_PREF_OWNER_PASSWORD, null);
+            userPasswordField.setText(prefs.getString(Preferences.USER_PREF_USER_PASSWORD, ""));
+            signaturePasswordField.setText(prefs.getString(Preferences.USER_PREF_SIG_PASSWORD, ""));
         }
         if (ownerPassword == null)
             ownerPassword = UUID.randomUUID().toString();
@@ -749,7 +799,7 @@ public class UI extends JSplitPane {
     private final JRadioButtonMenuItem lafSystem = new JRadioButtonMenuItem("OS Default");
     private final JRadioButtonMenuItem lafCross = new JRadioButtonMenuItem("Cross Platform");
 
-    private final JCheckBox storeOwnerPassword = new JCheckBox("Remember Owner Password");
+    private final JCheckBox storePasswords = new JCheckBox("Remember Passwords");
 
     private final JPrefCheckBoxMenuItem viewQualityAA
             = new JPrefCheckBoxMenuItem("Antialiasing", Preferences.USER_PREF_VIEWER_ANTIALIASING,
@@ -786,8 +836,10 @@ public class UI extends JSplitPane {
                     SwingUtilities.updateComponentTreeUI(signatureChooser);
                 SwingUtilities.updateComponentTreeUI(mergeOptions);
                 Preferences.getInstance().set(Preferences.USER_PREF_LAF, laf);
-                help.setOpaque(false);
-                help.setIcon(UIManager.getIcon(HELP_ICON_NAME));
+                permissionHelp.setOpaque(false);
+                permissionHelp.setIcon(UIManager.getIcon(HELP_ICON_NAME));
+                signingHelp.setOpaque(false);
+                signingHelp.setIcon(UIManager.getIcon(HELP_ICON_NAME));
                 normalFont = UIManager.getFont("Panel.font");
                 hintFont = normalFont.deriveFont(Font.ITALIC);
                 saveButton.setFont(normalFont.deriveFont(Font.BOLD, normalFont.getSize2D() * 1.5f));
@@ -850,17 +902,20 @@ public class UI extends JSplitPane {
             lafGroup.add(lafCross);
             lafGroup.add(lafSystem);
 
-            storeOwnerPassword.setToolTipText(
+            storePasswords.setToolTipText(
                     "<html>Stores the owner password in user preferences.<br>" +
                             "Otherwise the owner password is generated randomly on each start." +
                             "</html>");
-            storeOwnerPassword.addActionListener(e -> {
-                boolean sop = storeOwnerPassword.isSelected();
+            storePasswords.addActionListener(e -> {
+                boolean sop = storePasswords.isSelected();
                 var prefs = Preferences.getInstance();
-                if (sop != prefs.getBoolean(Preferences.USER_PREF_STORE_OWNER_PASSWORD, false)) {
-                    prefs.set(Preferences.USER_PREF_STORE_OWNER_PASSWORD, sop);
-                    if (!sop)
+                if (sop != prefs.getBoolean(Preferences.USER_PREF_STORE_PASSWORDS, false)) {
+                    prefs.set(Preferences.USER_PREF_STORE_PASSWORDS, sop);
+                    if (!sop) {
                         prefs.remove(Preferences.USER_PREF_OWNER_PASSWORD);
+                        prefs.remove(Preferences.USER_PREF_USER_PASSWORD);
+                        prefs.remove(Preferences.USER_PREF_SIG_PASSWORD);
+                    }
                 }
             });
 
@@ -893,7 +948,7 @@ public class UI extends JSplitPane {
             }
 
             JMenu options = new JMenu("Options");
-            options.add(storeOwnerPassword);
+            options.add(storePasswords);
             options.add(encryptionKeyLengthMenu);
             options.add(laf);
             options.add(renderQuality);
@@ -935,8 +990,8 @@ public class UI extends JSplitPane {
         else if (UIManager.getSystemLookAndFeelClassName().equals(currentLafClassName))
             lafSystem.setSelected(true);
 
-        storeOwnerPassword.setSelected(Preferences.getInstance().getBoolean(
-                Preferences.USER_PREF_STORE_OWNER_PASSWORD, false));
+        storePasswords.setSelected(Preferences.getInstance().getBoolean(
+                Preferences.USER_PREF_STORE_PASSWORDS, false));
         return menuBar;
     }
 
@@ -1056,6 +1111,10 @@ public class UI extends JSplitPane {
         if (pagesPerDocument.getValue() instanceof Number number) {
             int pagePerDocument = number.intValue();
             if (pagePerDocument > 0 && documentProxy != null) {
+
+                String ownerPwd = ownerPasswordField.getText().trim();
+                String userPwd = userPasswordField.getText().trim();
+
                 JFileChooser chooser = getSavePdfChooser();
                 chooser.setMultiSelectionEnabled(false);
                 chooser.setDialogTitle("Choose a base file name for split…");
@@ -1080,18 +1139,20 @@ public class UI extends JSplitPane {
                     }
 
                     int fileCount = 0;
-                    final PDDocument source = documentProxy.getDocument();
-                    Splitter splitter = new Splitter();
-                    splitter.setSplitAtPage(pagePerDocument);
                     try {
+                        final PDDocument source = documentProxy.getCopy();
+                        Splitter splitter = new Splitter();
+                        splitter.setSplitAtPage(pagePerDocument);
                         List<PDDocument> splittedDocs = splitter.split(source);
                         for (PDDocument doc : splittedDocs) {
-                            setDocumentInformation(doc);
                             String docFile = String.format("%s%03d%s", fprefix, ++fileCount, fpostfix);
-                            doc.save(docFile);
+                            saveDocument(doc, Paths.get(docFile), ownerPwd, userPwd);
                             Log.info("Stored file '%s'", docFile);
-                            doc.close();
                         }
+                        source.close();
+
+                        updatePreferences();
+
                         toaster.toast(ToastType.SUCCESS, 5000, "<html>Spitted to <br><font size='+1'>%s<i> [ 001 .. %03d ]%s</i></font></html>",
                                 fname, fileCount, fpostfix);
                     } catch (IOException e) {
@@ -1101,6 +1162,24 @@ public class UI extends JSplitPane {
                 }
             }
         }
+    }
+
+    /**
+     * Updates preferences that shall be updated only after a save operation.
+     */
+    protected void updatePreferences() {
+        var prefs = Preferences.getInstance();
+        prefs.set(Preferences.USER_PREF_SIG_ENABLED, this.sign.isSelected());
+        if (prefs.getBoolean(Preferences.USER_PREF_STORE_PASSWORDS, false)) {
+            prefs.set(Preferences.USER_PREF_OWNER_PASSWORD, this.ownerPasswordField.getText().trim());
+            prefs.set(Preferences.USER_PREF_USER_PASSWORD, this.userPasswordField.getText().trim());
+            prefs.set(Preferences.USER_PREF_SIG_PASSWORD, new String(this.signaturePasswordField.getPassword()));
+        } else {
+            prefs.remove(Preferences.USER_PREF_OWNER_PASSWORD);
+            prefs.remove(Preferences.USER_PREF_USER_PASSWORD);
+            prefs.remove(Preferences.USER_PREF_SIG_PASSWORD);
+        }
+
     }
 
     /**
@@ -1131,38 +1210,9 @@ public class UI extends JSplitPane {
                     String ownerPwd = ownerPasswordField.getText().trim();
                     String userPwd = userPasswordField.getText().trim();
 
-                    PDDocument document = documentProxy.getCopy();
+                    saveDocument(documentProxy.getCopy(), selectedFilePath, ownerPwd, userPwd);
 
-                    AccessPermission ap = new AccessPermission();
-                    ap.setCanPrint(allowPrinting.isSelected());
-                    ap.setCanModify(allowModification.isSelected());
-                    ap.setCanExtractContent(allowExtraction.isSelected());
-                    ap.setCanExtractForAccessibility(allowExtraction.isSelected());
-                    ap.setCanFillInForm(allowFillIn.isSelected());
-                    ap.setCanAssembleDocument(allowAssembly.isSelected());
-                    ap.setCanModifyAnnotations(allowAnnotations.isSelected());
-
-                    if (ownerPwd.isEmpty() && userPwd.isEmpty()) {
-                        document.setAllSecurityToBeRemoved(true);
-                    } else {
-                        StandardProtectionPolicy spp = new StandardProtectionPolicy(ownerPwd, userPwd, ap);
-                        Log.info("Encryption-key-length %d bits", this.encryptionKeyLength);
-                        spp.setEncryptionKeyLength(this.encryptionKeyLength);
-                        document.protect(spp);
-                    }
-
-                    setDocumentInformation(document);
-
-                    if (this.sign.isSelected()) {
-                        sign(document);
-                    }
-
-                    document.save(selectedFilePath.toFile());
-
-                    var prefs = Preferences.getInstance();
-                    if (prefs.getBoolean(Preferences.USER_PREF_STORE_OWNER_PASSWORD, false)) {
-                        prefs.set(Preferences.USER_PREF_OWNER_PASSWORD, ownerPwd);
-                    }
+                    updatePreferences();
 
                     List<Object> options = new ArrayList<>(2);
                     options.add("OK");
@@ -1208,26 +1258,80 @@ public class UI extends JSplitPane {
 
                 }
             } catch (Exception ex) {
+                ex.printStackTrace();
                 toaster.toast(ToastType.ERROR, 20000, "<html><font size='+2'>Error</font><br><font size='+1'><i>%s</i></font></html>", ex.getMessage());
                 // JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
     }
 
-    protected void sign(PDDocument document) {
-        char[] pw = signaturePasswordField.getText().toCharArray();
+    /**
+     * Saves one document. The document is closed during the call.
+     */
+    protected void saveDocument(PDDocument document, Path file, String ownerPwd, String userPwd) throws IOException {
         try {
-            SignatureTool createSignature = new SignatureTool(null, "".toCharArray());
+
+            setDocumentInformation(document);
+            final boolean doSign = this.sign.isSelected();
+
+            if ((!ownerPwd.isEmpty()) || (!userPwd.isEmpty())) {
+                AccessPermission ap = new AccessPermission();
+                ap.setCanPrint(allowPrinting.isSelected());
+                ap.setCanModify(allowModification.isSelected());
+                ap.setCanExtractContent(allowExtraction.isSelected());
+                ap.setCanExtractForAccessibility(allowExtraction.isSelected());
+                ap.setCanFillInForm(allowFillIn.isSelected());
+                ap.setCanAssembleDocument(allowAssembly.isSelected());
+                ap.setCanModifyAnnotations(allowAnnotations.isSelected());
+
+                StandardProtectionPolicy spp = new StandardProtectionPolicy(ownerPwd, userPwd, ap);
+                Log.info("Encryption-key-length %d bits", this.encryptionKeyLength);
+                spp.setEncryptionKeyLength(this.encryptionKeyLength);
+                document.protect(spp);
+
+                if (doSign) {
+                    // For some reason the encryption breaks if we sign fresh protected document.
+                    // If we reload it (in protected state) it works.
+                    ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
+                    document.save(os, CompressParameters.NO_COMPRESSION);
+                    document.close();
+                    document = Loader.loadPDF(os.toByteArray(), ownerPwd.isEmpty() ? userPwd : ownerPwd);
+                }
+            }
+
+            try (OutputStream os = new BufferedOutputStream(Files.newOutputStream(file))) {
+                if (doSign) {
+                    if (!sign(document))
+                        return;
+                    document.saveIncremental(os);
+                } else {
+                    document.save(os);
+                }
+            }
+        } finally {
+            if (document != null)
+                document.close();
+        }
+
+    }
+
+    protected boolean sign(PDDocument document) {
+        char[] pw = signaturePasswordField.getPassword();
+        try {
+            SignatureTool createSignature = new SignatureTool();
 
             try (InputStream is = Files.newInputStream(signatureKeyFile.toPath())) {
-                createSignature.addKey(is, pw);
-                createSignature.addSignature(document, "1", pw);
+                String alias = createSignature.addKey(is, pw);
+                createSignature.addSignature(document, alias, pw);
             }
-            Preferences.getInstance().set(Preferences.USER_PREF_SIG_PASSWORD,new String(pw));
+            Preferences pref = Preferences.getInstance();
+            pref.set(Preferences.USER_PREF_SIG_PASSWORD, new String(pw));
+            return true;
         } catch (Exception ex) {
             ex.printStackTrace();
             toaster.toast(ToastType.ERROR, 20000,
                     "<html><font size='+2'>Error</font><br><font size='+1'><i>%s</i></font></html>", ex.getMessage());
+            return false;
         }
 
 
@@ -1290,12 +1394,16 @@ public class UI extends JSplitPane {
     protected void loadSignature(File file) {
         this.signatureKeyFileName.setText(file == null ? "" : file.getName());
         this.signatureKeyFile = file;
-        if ( file == null )
-            this.sign.setSelected(false);
-        else {
+        Preferences pref = Preferences.getInstance();
+        if (file != null) {
             String parent = file.getParent();
             if (parent != null)
-                Preferences.getInstance().set(Preferences.USER_PREF_LAST_SIG_DIR, parent);
+                pref.set(Preferences.USER_PREF_LAST_SIG_DIR, parent);
+            pref.set(Preferences.USER_PREF_SIG_FILE, file.toString());
+        } else {
+            pref.remove(Preferences.USER_PREF_SIG_FILE);
+            pref.set(Preferences.USER_PREF_SIG_ENABLED, false);
+            this.sign.setSelected(false);
         }
     }
 
