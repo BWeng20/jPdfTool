@@ -8,6 +8,16 @@ public class Preferences {
     /**
      * User preferences key for the last PDF directory the user selected.
      */
+    public final static String USER_PREF_LAST_SIG_DIR = "last-sig-dir";
+
+    /**
+     * User preferences key for the signature password (if option is enabled).
+     */
+    public final static String USER_PREF_SIG_PASSWORD = "sig-key-password";
+
+    /**
+     * User preferences key for the last PDF directory the user selected.
+     */
     public final static String USER_PREF_LAST_PDF_DIR = "last-dir";
 
     /**

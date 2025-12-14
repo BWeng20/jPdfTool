@@ -21,6 +21,10 @@ dependencies {
     implementation "com.formdev:flatlaf-fonts-roboto:2.137"
     implementation "io.github.bweng20:jSVGIcon:1.6"
 
+    implementation "org.bouncycastle:bcprov-jdk18on:1.81"
+    implementation "org.bouncycastle:bcpkix-jdk18on:1.81"
+    implementation "org.bouncycastle:bcpg-jdk15to18:1.81"
+
     implementation 'org.apache.pdfbox:pdfbox:3.0.2'
     implementation 'org.apache.pdfbox:fontbox:3.0.2'
     implementation 'commons-logging:commons-logging:1.2'

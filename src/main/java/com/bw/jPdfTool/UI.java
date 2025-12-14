@@ -52,9 +52,11 @@ public class UI extends JSplitPane {
     protected static JFileChooser savePdfChooser;
     protected static JFileChooser pdfChooser;
     protected static JFileChooser imageChooser;
+    protected static JFileChooser signatureChooser;
 
     protected static FileNameExtensionFilter pdfFilter = new FileNameExtensionFilter("PDF-Files (*.pdf)", "pdf");
     protected static FileNameExtensionFilter imageFilter = new FileNameExtensionFilter("Picture (*.jpg, *.png)", "jpeg", "jpg", "png");
+    protected static FileNameExtensionFilter sigFilter = new FileNameExtensionFilter("PKCS#12-Files (*.p12)", "p12");
 
     private final JTextField ownerPasswordField = new JTextField();
     private final JTextField userPasswordField = new JTextField();
@@ -77,6 +79,14 @@ public class UI extends JSplitPane {
 
     private final JTextField keywords = new JTextField(15);
     private final JLabel statusMessage = new JLabel();
+
+    /////////////////////////////////////////////
+    // Signing
+    /// //////////////////////////////////////////
+    private final JCheckBox sign = new JCheckBox("Sign it");
+    private final JLabel signatureKeyFileName = new JLabel();
+    private File signatureKeyFile;
+    private final JTextField signaturePasswordField = new JTextField();
 
 
     /////////////////////////////////////////////
@@ -149,38 +159,14 @@ public class UI extends JSplitPane {
         final FontMetrics fm = getFontMetrics(normalFont);
         final int charWith = fm.charWidth('W');
 
-
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 5));
 
-        JButton generateOwner = new JButton("Generate Owner Password");
-
-        help.addActionListener(e -> JOptionPane.showMessageDialog(this,
-                "<html><font size='+2'><b>How to set PDF Permissions</b></font><br>" +
-                        "<font size='+1'>" +
-                        "To prevent unauthorized access to a PDF, you only need to set a user password.<br>" +
-                        "If you also want to define specific permissions - such as restricting printing or<br>" +
-                        "editing - you must set both an owner password and a user password.<br>" +
-                        "The owner password always grants full control over the document, while the user<br>" +
-                        "password enforces only the permissions you've selected.<br>" +
-                        "Most tools use a hidden, automatically generated owner password to prevent<br>" +
-                        "users from gaining full access.<br><br>" +
-                        "Remint, that permission <i>Annotations</i> covers forms, comments and signing.</font></html>"));
-
-        compression.setSelected(true);
-        allowPrinting.setSelected(true);
         saveButton.setEnabled(false);
         saveButton.setFont(normalFont.deriveFont(Font.BOLD, normalFont.getSize2D() * 1.5f));
         browseAppendButton.setEnabled(false);
         splitDocument.setEnabled(false);
         rotation.setEditable(false);
-
-
-        JLabel ownerPasswordLabel = new JLabel("Owner Password");
-        ownerPasswordLabel.setLabelFor(ownerPasswordField);
-
-        JLabel userPasswordLabel = new JLabel("User Password");
-        userPasswordLabel.setLabelFor(userPasswordField);
 
         GridBagConstraints gcLabel = new GridBagConstraints();
         gcLabel.anchor = GridBagConstraints.NORTHWEST;
@@ -198,30 +184,6 @@ public class UI extends JSplitPane {
         panel.add(createDocumentPanel(), gc);
 
         pages.addSelectionListener(e -> setSelectedPage(e.getFirstIndex() < 0 ? null : pages.getSelectedPage()));
-
-        deleteButton.setOpaque(false);
-        deleteButton.setToolTipText("Deletes the current page.");
-        deleteButton.addActionListener(e -> doDeletePage());
-
-        rotateClockwiseButton.setOpaque(false);
-        rotateClockwiseButton.setToolTipText("Rotates the current page clockwise.");
-        rotateClockwiseButton.addActionListener(e -> doRotateClockwise());
-
-        moveLeft.setOpaque(false);
-        moveLeft.setToolTipText("Moves the current page up.");
-        moveLeft.addActionListener(e -> doMoveLeft());
-
-        moveRight.setOpaque(false);
-        moveRight.setToolTipText("Moves the current page down.");
-        moveRight.addActionListener(e -> doMoveRight());
-
-        exportImages.setToolTipText("Exports embedded images of the current page.");
-        exportImages.addActionListener(e -> {
-            PageWidget pw = pages.getSelectedPage();
-            if (pw != null) {
-                showImageExtractor(pw.getPage());
-            }
-        });
 
         JPanel manipulations = new JPanel(new GridBagLayout());
         GridBagConstraints pmGc = new GridBagConstraints();
@@ -243,59 +205,28 @@ public class UI extends JSplitPane {
         gc.gridy = 2;
         panel.add(manipulations, gc);
 
+        gc.gridy = 3;
+        JPanel security = new JPanel(new GridBagLayout());
+        pmGc.gridx = 0;
+        security.add(createPermissionsPanel(), pmGc);
+        pmGc.gridx++;
+        security.add(createSigningPanel(), pmGc);
+
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        gc.anchor = GridBagConstraints.NORTHWEST;
+        gc.gridy = 3;
+        panel.add(security, gc);
+
         gcLabel.gridx = 0;
         gcLabel.gridy = 3;
-        panel.add(ownerPasswordLabel, gcLabel);
 
         gc.gridx = 0;
         gc.gridy = 4;
-        gc.gridwidth = 1;
-        gc.weightx = 1;
         gc.fill = GridBagConstraints.HORIZONTAL;
-        panel.add(ownerPasswordField, gc);
-        gc.gridx = 1;
         gc.weightx = 0;
-        panel.add(generateOwner, gc);
-        gcLabel.gridy += 2;
-        panel.add(userPasswordLabel, gcLabel);
-        gc.weightx = 1;
-        gc.gridwidth = 2;
-        gc.gridx = 0;
-        gc.gridy += 2;
-        panel.add(userPasswordField, gc);
-
-        JPanel permissions = new JPanel(new GridLayout(4, 2));
-
-        permissions.add(compression);
-        permissions.add(allowPrinting);
-        permissions.add(allowModification);
-        permissions.add(allowAnnotations);
-        permissions.add(allowExtraction);
-        permissions.add(allowFillIn);
-        permissions.add(allowAssembly);
-
-        allowAnnotations.addItemListener(e -> SwingUtilities.invokeLater(this::updatePermissions));
-
-        gc.weightx = 1;
-        gc.gridx = 0;
-        gc.gridy++;
         gc.gridwidth = 1;
-        gc.fill = GridBagConstraints.HORIZONTAL;
-        panel.add(permissions, gc);
-
-        gc.gridx = 1;
-        gc.weightx = 0;
-        gc.fill = GridBagConstraints.NONE;
-        panel.add(help, gc);
-
-        gc.gridx = 0;
-        gc.gridy++;
-        gc.gridwidth = 2;
-        gc.weightx = 1;
-        gc.fill = GridBagConstraints.NONE;
-        gc.insets.top = 10;
-        gcLabel.anchor = GridBagConstraints.NORTHWEST;
         panel.add(saveButton, gc);
+
         gc.insets.bottom = 5;
 
         gcLabel.gridy = gc.gridy + 1;
@@ -304,37 +235,6 @@ public class UI extends JSplitPane {
         gcLabel.gridwidth = 1;
         gcLabel.fill = GridBagConstraints.BOTH;
         panel.add(Box.createGlue(), gcLabel);
-
-
-        String ownerPassword = null;
-
-        generateOwner.addActionListener(e -> ownerPasswordField.setText(UUID.randomUUID().toString()));
-        if (Preferences.getInstance().getBoolean(Preferences.USER_PREF_STORE_OWNER_PASSWORD, false)) {
-            ownerPassword = Preferences.getInstance().getString(Preferences.USER_PREF_OWNER_PASSWORD, null);
-        }
-        if (ownerPassword == null)
-            ownerPassword = UUID.randomUUID().toString();
-        ownerPasswordField.setText(ownerPassword);
-
-        DocumentListener passwordChecker = new DocumentListener() {
-            @Override
-            public void insertUpdate(DocumentEvent e) {
-                updatePermissions();
-            }
-
-            @Override
-            public void removeUpdate(DocumentEvent e) {
-                updatePermissions();
-            }
-
-            @Override
-            public void changedUpdate(DocumentEvent e) {
-                updatePermissions();
-            }
-        };
-
-        ownerPasswordField.getDocument().addDocumentListener(passwordChecker);
-        userPasswordField.getDocument().addDocumentListener(passwordChecker);
 
         browseButton.addActionListener(e -> doBrowsePdf());
         browseAppendButton.addActionListener(e -> {
@@ -369,6 +269,194 @@ public class UI extends JSplitPane {
         SwingUtilities.invokeLater(() ->
                 toaster.attachFrame((JFrame) SwingUtilities.getWindowAncestor(this))
         );
+    }
+
+    protected JPanel createSigningPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+
+        GridBagConstraints gc = new GridBagConstraints();
+        gc.insets = new Insets(0, 5, 5, 5);
+        gc.gridx = 0;
+        gc.gridy = 0;
+        gc.gridwidth = 1;
+        gc.weightx = 0;
+        gc.weighty = 0;
+        gc.fill = GridBagConstraints.NONE;
+        gc.anchor = GridBagConstraints.NORTHWEST;
+
+        JPanel signButtons = new JPanel(new GridBagLayout());
+
+        signButtons.add(sign, gc);
+        JButton browseSignature = new JButton("Select Key");
+        browseSignature.addActionListener(e -> doBrowseSignatureFile());
+        gc.gridx = 1;
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        gc.weightx = 1;
+        signButtons.add(browseSignature, gc);
+
+        gc.gridwidth = 2;
+        gc.gridx = 0;
+        panel.add(signButtons, gc);
+
+        gc.fill = GridBagConstraints.NONE;
+        gc.weightx = 0;
+        gc.gridy = 1;
+        gc.gridwidth = 1;
+        JLabel label = new JLabel("Key File");
+        panel.add(label, gc);
+        gc.gridy++;
+        label = new JLabel("Password" );
+        label.setLabelFor(signaturePasswordField);
+        panel.add(label, gc);
+
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        gc.weightx = 1;
+        gc.gridy = 1;
+        gc.gridx = 1;
+        panel.add(signatureKeyFileName, gc);
+        gc.gridy++;
+
+        signaturePasswordField.setText(getPref( Preferences.USER_PREF_SIG_PASSWORD, "" ));
+
+        panel.add(signaturePasswordField, gc);
+
+        gc.fill = GridBagConstraints.BOTH;
+        gc.gridwidth = 2;
+        gc.weighty= 1;
+        gc.gridx = 0;
+        gc.gridy++;
+        panel.add(Box.createGlue(), gc);
+
+
+        panel.setBorder(BorderFactory.createTitledBorder("Signing"));
+        return panel;
+    }
+
+    protected JPanel createPermissionsPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+
+        help.addActionListener(e -> JOptionPane.showMessageDialog(this,
+                "<html><font size='+2'><b>How to set PDF Permissions</b></font><br>" +
+                        "<font size='+1'>" +
+                        "To prevent unauthorized access to a PDF, you only need to set a <b>user password</b>.<br>" +
+                        "The user password is required to open the document.<br><br>" +
+                        "If you want to define specific permissions - such as restricting printing or<br>" +
+                        "editing - you must set an <b>owner password</b>.<br>" +
+                        "The <b>owner password</b> always grants full control over the document,<br>" +
+                        "but is not required to open the document.<br>" +
+                        "If a document with an owner password set is opened without this password,<br>" +
+                        "the permissions you selected are enforced. Tools will normally not prompt for it.<br><br>" +
+                        "Most tools that set permissions use a hidden, automatically generated owner password to prevent<br>" +
+                        "users from gaining full access.<br><br>" +
+                        "If you use the same password for both the user and owner passwords, the restrictions will<br>" +
+                        "have no effect, as the single entered password will satisfy the <b>owner password</b> requirement,<br>" +
+                        "thereby unlocking the document with full owner rights.<br><br>" +
+                        "<b>Reminder:</b> The <i>Annotations</i> permission covers forms, comments, and signing.</font></html>"));
+
+        JButton generateOwner = new JButton("<html><body>Generate<br>Owner Password</body></html>");
+        compression.setSelected(true);
+        allowPrinting.setSelected(true);
+        saveButton.setEnabled(false);
+        saveButton.setFont(normalFont.deriveFont(Font.BOLD, normalFont.getSize2D() * 1.5f));
+        browseAppendButton.setEnabled(false);
+        splitDocument.setEnabled(false);
+        rotation.setEditable(false);
+
+        JLabel ownerPasswordLabel = new JLabel("Owner Password");
+        ownerPasswordLabel.setLabelFor(ownerPasswordField);
+
+        JLabel userPasswordLabel = new JLabel("User Password");
+        userPasswordLabel.setLabelFor(userPasswordField);
+
+        GridBagConstraints gcLabel = new GridBagConstraints();
+        gcLabel.anchor = GridBagConstraints.NORTHWEST;
+        gcLabel.fill = GridBagConstraints.NONE;
+        gcLabel.insets = new Insets(0, 5, 5, 5);
+
+        GridBagConstraints gc = new GridBagConstraints();
+        gc.insets = new Insets(0, 0, 5, 5);
+        gc.gridx = 0;
+        gc.gridy = 0;
+        gc.gridwidth = 3;
+        gc.weightx = 1;
+        gc.weighty = 0;
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        gc.anchor = GridBagConstraints.NORTHWEST;
+
+        gcLabel.gridx = 0;
+        gcLabel.gridy = 3;
+        panel.add(ownerPasswordLabel, gcLabel);
+
+        gc.gridy = 4;
+        gc.gridwidth = 1;
+        panel.add(ownerPasswordField, gc);
+        gc.gridx = 1;
+        gc.weightx = 0;
+        panel.add(generateOwner, gc);
+        gcLabel.gridy += 2;
+        panel.add(userPasswordLabel, gcLabel);
+        gc.weightx = 1;
+        gc.gridwidth = 2;
+        gc.gridx = 0;
+        gc.gridy += 2;
+        panel.add(userPasswordField, gc);
+
+        JPanel permissions = new JPanel(new GridLayout(4, 2));
+
+        permissions.add(compression);
+        permissions.add(allowPrinting);
+        permissions.add(allowModification);
+        permissions.add(allowAnnotations);
+        permissions.add(allowExtraction);
+        permissions.add(allowFillIn);
+        permissions.add(allowAssembly);
+
+        gc.weightx = 1;
+        gc.gridx = 0;
+        gc.gridy++;
+        gc.gridwidth = 1;
+        gc.fill = GridBagConstraints.HORIZONTAL;
+        panel.add(permissions, gc);
+
+        gc.gridx = 1;
+        gc.weightx = 0;
+        gc.fill = GridBagConstraints.NONE;
+        panel.add(help, gc);
+
+        allowAnnotations.addItemListener(e -> SwingUtilities.invokeLater(this::updatePermissions));
+        String ownerPassword = null;
+
+        generateOwner.addActionListener(e -> ownerPasswordField.setText(UUID.randomUUID().toString()));
+        if (Preferences.getInstance().getBoolean(Preferences.USER_PREF_STORE_OWNER_PASSWORD, false)) {
+            ownerPassword = Preferences.getInstance().getString(Preferences.USER_PREF_OWNER_PASSWORD, null);
+        }
+        if (ownerPassword == null)
+            ownerPassword = UUID.randomUUID().toString();
+        ownerPasswordField.setText(ownerPassword);
+
+        DocumentListener passwordChecker = new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                updatePermissions();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                updatePermissions();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                updatePermissions();
+            }
+        };
+
+        ownerPasswordField.getDocument().addDocumentListener(passwordChecker);
+        userPasswordField.getDocument().addDocumentListener(passwordChecker);
+
+        panel.setBorder(BorderFactory.createTitledBorder("Permissions"));
+
+        return panel;
     }
 
     protected JPanel createDocumentPanel() {
@@ -438,9 +526,9 @@ public class UI extends JSplitPane {
         gc.gridheight = 1;
         gc.anchor = GridBagConstraints.WEST;
         gc.gridx = 0;
-        gc.gridy = 2;
+        gc.gridy = 1;
         gc.weightx = 0;
-        gc.gridwidth = 3;
+        gc.gridwidth = 2;
 
         JPanel docButtons = new JPanel(new FlowLayout(FlowLayout.LEFT));
         docButtons.add(useDocumentInformation);
@@ -580,6 +668,30 @@ public class UI extends JSplitPane {
     }
 
     protected JPanel createPageManipulationPanel() {
+        deleteButton.setOpaque(false);
+        deleteButton.setToolTipText("Deletes the current page.");
+        deleteButton.addActionListener(e -> doDeletePage());
+
+        rotateClockwiseButton.setOpaque(false);
+        rotateClockwiseButton.setToolTipText("Rotates the current page clockwise.");
+        rotateClockwiseButton.addActionListener(e -> doRotateClockwise());
+
+        moveLeft.setOpaque(false);
+        moveLeft.setToolTipText("Moves the current page up.");
+        moveLeft.addActionListener(e -> doMoveLeft());
+
+        moveRight.setOpaque(false);
+        moveRight.setToolTipText("Moves the current page down.");
+        moveRight.addActionListener(e -> doMoveRight());
+
+        exportImages.setToolTipText("Exports embedded images of the current page.");
+        exportImages.addActionListener(e -> {
+            PageWidget pw = pages.getSelectedPage();
+            if (pw != null) {
+                showImageExtractor(pw.getPage());
+            }
+        });
+
         JPanel pageManipulation = new JPanel(new GridBagLayout());
         GridBagConstraints gc = new GridBagConstraints();
         gc.anchor = GridBagConstraints.WEST;
@@ -670,6 +782,8 @@ public class UI extends JSplitPane {
                     SwingUtilities.updateComponentTreeUI(imageChooser);
                 if (savePdfChooser != null)
                     SwingUtilities.updateComponentTreeUI(savePdfChooser);
+                if (signatureChooser != null)
+                    SwingUtilities.updateComponentTreeUI(signatureChooser);
                 SwingUtilities.updateComponentTreeUI(mergeOptions);
                 Preferences.getInstance().set(Preferences.USER_PREF_LAF, laf);
                 help.setOpaque(false);
@@ -828,6 +942,16 @@ public class UI extends JSplitPane {
 
     protected void setDpi(int dpi) {
         Preferences.getInstance().set(Preferences.USER_PREF_DPI, dpi);
+    }
+
+    protected void doBrowseSignatureFile() {
+        JFileChooser chooser = getSignatureChooser();
+        chooser.setDialogTitle("Select Signature to use...");
+        int result = chooser.showOpenDialog(this);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            File selectedFile = chooser.getSelectedFile();
+            loadSignature(selectedFile);
+        }
     }
 
     /**
@@ -1028,6 +1152,11 @@ public class UI extends JSplitPane {
                     }
 
                     setDocumentInformation(document);
+
+                    if (this.sign.isSelected()) {
+                        sign(document);
+                    }
+
                     document.save(selectedFilePath.toFile());
 
                     var prefs = Preferences.getInstance();
@@ -1085,6 +1214,25 @@ public class UI extends JSplitPane {
         }
     }
 
+    protected void sign(PDDocument document) {
+        char[] pw = signaturePasswordField.getText().toCharArray();
+        try {
+            SignatureTool createSignature = new SignatureTool(null, "".toCharArray());
+
+            try (InputStream is = Files.newInputStream(signatureKeyFile.toPath())) {
+                createSignature.addKey(is, pw);
+                createSignature.addSignature(document, "1", pw);
+            }
+            Preferences.getInstance().set(Preferences.USER_PREF_SIG_PASSWORD,new String(pw));
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            toaster.toast(ToastType.ERROR, 20000,
+                    "<html><font size='+2'>Error</font><br><font size='+1'><i>%s</i></font></html>", ex.getMessage());
+        }
+
+
+    }
+
     public static boolean askOverwrite(Component comp, Path file) {
         int overwrite = JOptionPane.showConfirmDialog(
                 comp,
@@ -1136,6 +1284,18 @@ public class UI extends JSplitPane {
             pageNb.setText("Select a Page");
             pageNb.setFont(hintFont);
             quality.setText("");
+        }
+    }
+
+    protected void loadSignature(File file) {
+        this.signatureKeyFileName.setText(file == null ? "" : file.getName());
+        this.signatureKeyFile = file;
+        if ( file == null )
+            this.sign.setSelected(false);
+        else {
+            String parent = file.getParent();
+            if (parent != null)
+                Preferences.getInstance().set(Preferences.USER_PREF_LAST_SIG_DIR, parent);
         }
     }
 
@@ -1312,8 +1472,7 @@ public class UI extends JSplitPane {
 
 
     protected void updatePermissions() {
-        boolean rightsPossible =
-                !(ownerPasswordField.getText().trim().isEmpty() || userPasswordField.getText().trim().isEmpty());
+        boolean rightsPossible = !ownerPasswordField.getText().trim().isEmpty();
         allowPrinting.setEnabled(rightsPossible);
         allowExtraction.setEnabled(rightsPossible);
         allowModification.setEnabled(rightsPossible);
@@ -1346,6 +1505,24 @@ public class UI extends JSplitPane {
             pdfChooser.setCurrentDirectory(new File(lastDir));
         }
         return pdfChooser;
+    }
+
+    public static JFileChooser getSignatureChooser() {
+        if (signatureChooser == null) {
+            signatureChooser = new JFileChooser();
+        }
+        String lastDir = getPref(Preferences.USER_PREF_LAST_SIG_DIR, null);
+        if (lastDir != null) {
+            Log.debug("Last Signature Directory '%s'", lastDir);
+            signatureChooser.setCurrentDirectory(new File(lastDir));
+        }
+        signatureChooser.setDialogTitle("Select Signature file to use…");
+        signatureChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        signatureChooser.setMultiSelectionEnabled(false);
+        signatureChooser.setFileFilter(sigFilter);
+        signatureChooser.setAccessory(null);
+        return signatureChooser;
+
     }
 
     public static JFileChooser getSavePdfChooser() {
