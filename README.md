@@ -74,8 +74,12 @@ Export the PDF into separate documents.
 Toggle between FlatLaf Dark/Light themes or system defaults.<br>
 The setting is stored in user-preferences.
 
+### 🖊️ Sign the File with a Certificate
+Sign the file using a certificate.<br>
+A `.p12` file with an X.509 certificate is required.
+
 ## 🛠️ TODOs
 
 E-mail me if I missed important features. 
 
-![Screenshot](doc/Screenshot%20Release1.3.png)
+![Screenshot](doc/Screenshot%20Release2.0.png)
