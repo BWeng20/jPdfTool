@@ -1,12 +1,9 @@
 package com.bw.jPdfTool;
 
-import com.bw.jPdfTool.model.MergeOptions;
-import com.bw.jtools.svg.SVGConverter;
-import com.bw.jtools.ui.ShapeMultiResolutionImage;
-import com.formdev.flatlaf.fonts.roboto.FlatRobotoFont;
-import com.formdev.flatlaf.util.SystemInfo;
+import com.bw.jPdfTool.cli.CommandExecuter;
+import com.bw.jPdfTool.ui.UI;
+import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 
-import javax.swing.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -14,72 +11,115 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * CLI interface. Accepts file names as arguments and opens the UI.
+ * CLI interface. Accepts file names as arguments and opens the UI or executes commands headless.
  */
 public class Main {
 
     public static void main(String[] args) {
         Main main = new Main();
 
-        main.files = new ArrayList<>(args.length);
-        for (String a : args) {
-            Path p = Paths.get(a);
-            if (Files.exists(p))
-                main.files.add(p);
-            else {
-                Log.error("File '%s' doesn't exists.", a);
-            }
+        main.parseArguments(args);
+        if (main.cli) {
+            main.executeCommands();
+        } else {
+            main.createUI();
         }
-
-        SwingUtilities.invokeLater(main::createUI);
     }
 
+    public void parseArguments(String[] args) {
+        try {
+            this.files = new ArrayList<>(args.length);
+            for (int ai = 0; ai < args.length; ai++) {
+                String arg = args[ai];
+                if (arg.equalsIgnoreCase("-out")) {
+                    this.cli = true;
+                    this.outfile = Paths.get(args[++ai]);
+                } else if (arg.equalsIgnoreCase("-orginalpassword")) {
+                    this.cli = true;
+                    this.password2Load = args[++ai];
+                } else if (arg.equalsIgnoreCase("-ownerpassword")) {
+                    this.cli = true;
+                    this.ownerpassword = args[++ai];
+                } else if (arg.equalsIgnoreCase("-userpassword")) {
+                    this.cli = true;
+                    this.userpassword = args[++ai];
+                } else {
+                    Path p = Paths.get(arg);
+                    if (Files.exists(p))
+                        this.files.add(p);
+                    else {
+                        Log.error("File '%s' doesn't exists.", arg);
+                    }
+                }
+            }
+        } catch (ArrayIndexOutOfBoundsException ae) {
+            System.err.println("Error in arguments");
+            usage();
+            System.exit(1);
+        }
+
+    }
+
+    private boolean cli = false;
+
+    private Path outfile;
     private List<Path> files;
+    private String ownerpassword;
+    private String userpassword;
+    private String password2Load;
+
+    // TODO: Add cli for that
+    private Path signaturefile;
+    // TODO: Add cli for that
+    private char[] signaturePassword;
+
+    protected void usage() {
+    }
+
+    protected void executeCommands() {
+
+        if (files.isEmpty()) {
+            System.err.println("No file arguments given");
+            usage();
+            System.exit(2);
+        }
+        if (outfile == null) {
+            System.err.println("No output file given");
+            usage();
+            System.exit(3);
+        }
+        try {
+
+            // TODO: Currently all input files are merged and protected.
+
+            CommandExecuter executer = new CommandExecuter(files);
+            executer.loadDocuments(password2Load);
+
+            // TODO: Add cli for that
+            AccessPermission ap = new AccessPermission();
+            ap.setCanPrint(true);
+            ap.setCanModify(false);
+            ap.setCanExtractContent(true);
+            ap.setCanExtractForAccessibility(true);
+            ap.setCanFillInForm(false);
+            ap.setCanAssembleDocument(false);
+            ap.setCanModifyAnnotations(false);
+
+            // TODO: Add cli for that
+            int encryptionKeyLength = 256;
+
+            executer.save(ownerpassword, userpassword, ap, encryptionKeyLength, outfile,
+                    signaturefile, signaturePassword);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.exit(1);
+        }
+        System.exit(0);
+    }
 
     protected void createUI() {
-
-        FlatRobotoFont.installLazy();
-        if (SystemInfo.isLinux) {
-            JFrame.setDefaultLookAndFeelDecorated(true);
-            JDialog.setDefaultLookAndFeelDecorated(true);
-        }
-
-        String lafClassName = UI.getPref(Preferences.USER_PREF_LAF, Preferences.DEFAULT_LAF);
-        try {
-            UIManager.setLookAndFeel(lafClassName);
-        } catch (Exception e) {
-            System.err.println("Failed to set LAF " + lafClassName);
-        }
-
-        UIManager.put("Panel.arc", 8);
-        UI ui = new UI();
-
-        mainWindow = new JFrame("PDF Passwords & Rights");
-
-        try {
-            ShapeMultiResolutionImage icon = new ShapeMultiResolutionImage(
-                    SVGConverter.convert(Main.class.getResourceAsStream("/icon.svg"))
-            );
-            mainWindow.setIconImage(icon);
-        } catch (Exception ignored) {
-        }
-        mainWindow.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-
-        mainWindow.setJMenuBar(ui.getMenu());
-        mainWindow.setLocationByPlatform(true);
-        ui.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-        mainWindow.setContentPane(ui);
-        mainWindow.pack();
-        mainWindow.setVisible(true);
-
-        if (!files.isEmpty()) {
-            MergeOptions mo = new MergeOptions();
-            ui.selectPdf(files.get(0).toFile());
-            for (int i = 1; i < files.size(); ++i)
-                ui.appendPdf(files.get(i).toFile(), mo);
-        }
+        UI.createUI(files);
     }
-
-    public static JFrame mainWindow;
 
 }

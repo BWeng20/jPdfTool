@@ -1,9 +1,14 @@
-package com.bw.jPdfTool;
+package com.bw.jPdfTool.ui;
 
 import com.bw.jPdfTool.model.MergeOptions;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import javax.swing.UIManager;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 
 public final class MergeOptionIcon implements Icon {
 

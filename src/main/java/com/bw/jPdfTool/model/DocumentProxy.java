@@ -1,7 +1,6 @@
 package com.bw.jPdfTool.model;
 
 import com.bw.jPdfTool.Log;
-import com.bw.jPdfTool.RenderQueue;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
@@ -9,54 +8,35 @@ import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageTree;
-import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 
-import javax.swing.*;
+import javax.swing.SwingUtilities;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.function.Consumer;
 
 /**
  * Simple proxy for lazy asynchronous handling of the pdf documents.
  */
 public class DocumentProxy {
 
-    private final List<Page> pages = new ArrayList<>();
+    public final List<Page> pages = new ArrayList<>();
     private final List<DocumentConsumer> docConsumerList = new ArrayList<>();
     private boolean closed = false;
-    private String owerPassword4Load;
-    private final JPasswordField passwordField = new JPasswordField();
     private PDDocument document;
     private final RenderQueue renderQueue;
     private final List<DocumentProxy.PageConsumer> pageConsumerList = new ArrayList<>();
 
+    public final Deque<PdfLoadWorker> loadWorker = new ArrayDeque<>();
+    public PdfLoadWorker currentLoader;
 
-    private final Deque<PdfLoadWorker> loadWorker = new ArrayDeque<>();
-    private PdfLoadWorker currentLoader;
-
-    private String error;
+    public String error;
 
     public DocumentProxy(RenderQueue renderQueue) {
         this.renderQueue = renderQueue;
-    }
-
-    /**
-     * Triggers loading of the document in background
-     */
-    public synchronized void load(Path file, MergeOptions mo, Consumer<PDDocument> r) {
-        ensuredNotClosed();
-        synchronized (this) {
-            PdfLoadWorker lw = new PdfLoadWorker(file, mo, r);
-            loadWorker.addLast(lw);
-            startNextLoader();
-        }
     }
 
     /**
@@ -64,7 +44,7 @@ public class DocumentProxy {
      * Document for document and if all documents are loaded, renders all pages.<br>
      * This is done parallel to the UI that shows the known pages.
      */
-    protected synchronized void startNextLoader() {
+    public synchronized void startNextLoader() {
         if (currentLoader == null) {
             currentLoader = loadWorker.pollFirst();
             if (currentLoader != null)
@@ -90,27 +70,12 @@ public class DocumentProxy {
     }
 
     /**
-     * Helper to request the owner password from user.
+     * Set the effective document
      */
-    protected void requestOwnerPassword(Path file, MergeOptions mo, Consumer<PDDocument> consumer) {
-        SwingUtilities.invokeLater(() -> {
-            Object[] message = {"Enter Owner Password:", passwordField};
-            int option = JOptionPane.showConfirmDialog(
-                    null, message, "Owner Password needed",
-                    JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE
-            );
-
-            if (option == JOptionPane.OK_OPTION) {
-                owerPassword4Load = new String(passwordField.getPassword());
-                // retry
-                loadWorker.add(new PdfLoadWorker(file, mo, consumer));
-                startNextLoader();
-            } else {
-                error = "File is protected.\nPassword needed.";
-                fireDocumentLoaded();
-            }
-        });
+    public void setDocument(PDDocument document) {
+        this.document = document;
     }
+
 
     /**
      * Adds a Page consumer.<br>
@@ -138,18 +103,38 @@ public class DocumentProxy {
         }
     }
 
+    private boolean notificationTriggered = false;
+    private final List<Page> renderedPages = new LinkedList<>();
+
     /**
-     * Called by renderer if a page was finished.
+     * Called by renderer if a page was finished.<br>
+     * Called from worker threads.
      */
     public void firePageRendered(Page page) {
         if (closed || page == null)
             return;
-        List<PageConsumer> l;
-        synchronized (pageConsumerList) {
-            l = new ArrayList<>(pageConsumerList);
-        }
-        for (var pc : l) {
-            pc.pageRendered(page);
+        synchronized (renderedPages) {
+            renderedPages.add(page);
+            if (!notificationTriggered) {
+                SwingUtilities.invokeLater(() -> {
+                    List<Page> pages;
+                    synchronized (renderedPages) {
+                        notificationTriggered = false;
+                        pages = new ArrayList<>(renderedPages);
+                        renderedPages.clear();
+                    }
+                    List<PageConsumer> l;
+                    synchronized (pageConsumerList) {
+                        l = new ArrayList<>(pageConsumerList);
+                    }
+                    Log.debug("%d pages finished", pages.size());
+                    for (Page p : pages) {
+                        for (var pc : l) {
+                            pc.pageRendered(page);
+                        }
+                    }
+                });
+            }
         }
     }
 
@@ -179,7 +164,7 @@ public class DocumentProxy {
         }
     }
 
-    protected void fireDocumentLoaded() {
+    public void fireDocumentLoaded() {
         if (closed)
             return;
         List<DocumentConsumer> l;
@@ -223,7 +208,7 @@ public class DocumentProxy {
         if (currentLoader != null) {
             var cl = currentLoader;
             currentLoader = null;
-            cl.cancel(true);
+            cl.cancel();
         }
     }
 
@@ -342,7 +327,7 @@ public class DocumentProxy {
         }
     }
 
-    protected void ensuredNotClosed() {
+    public void ensuredNotClosed() {
         if (closed)
             throw new IllegalStateException("Document is closed");
     }
@@ -362,16 +347,6 @@ public class DocumentProxy {
     }
 
 
-    public void setOwnerPassword(String ownerPassword) {
-        if (ownerPassword != null) {
-            owerPassword4Load = ownerPassword.trim();
-            if (owerPassword4Load.isEmpty())
-                owerPassword4Load = null;
-        } else {
-            owerPassword4Load = null;
-        }
-    }
-
     public boolean isClosed() {
         return closed;
     }
@@ -389,6 +364,81 @@ public class DocumentProxy {
             }
         }
         return false;
+    }
+
+    public synchronized void loaderFinished(PdfLoadWorker loadWorker, PDDocument document, MergeOptions mo) {
+        boolean fireLoaded = false;
+        int oldPageCount = -1;
+        currentLoader = null;
+        if (!isClosed()) {
+            {
+                if (document != null) {
+                    int pageCount;
+                    if (this.getDocument() == null) {
+                        this.setDocument(document);
+                        this.pages.clear();
+                        pageCount = this.getDocument().getNumberOfPages();
+                    } else {
+                        // Append pages
+                        try {
+                            oldPageCount = this.getDocument().getNumberOfPages();
+                            PDFMergerUtility pdfMergerUtility = new PDFMergerUtility();
+                            pdfMergerUtility.appendDocument(this.getDocument(), document);
+                        } catch (Exception e) {
+                            Log.error("Failed to merge. %s", e.getMessage());
+                            oldPageCount = -1;
+                        } finally {
+                            IOUtils.closeQuietly(document);
+                        }
+                        pageCount = this.pages.size() + document.getNumberOfPages();
+                    }
+                    // zipper merge if requested
+                    if (mo.startPageNb > 0 && mo.startPageNb < oldPageCount) {
+                        int targetPageIndex = mo.startPageNb - 1;
+                        int segmentCount = 0;
+                        int pageToMoveIndex = oldPageCount;
+                        PDPageTree tree = this.getDocument().getDocumentCatalog().getPages();
+
+                        while (pageToMoveIndex < pageCount) {
+
+                            PDPage pdPage = tree.get(pageToMoveIndex);
+                            if (targetPageIndex > 0) {
+                                PDPage prevPage = tree.get(targetPageIndex - 1);
+                                tree.remove(pageToMoveIndex);
+                                tree.insertAfter(pdPage, prevPage);
+                            } else {
+                                PDPage nextPage = tree.get(targetPageIndex);
+                                tree.remove(pageToMoveIndex);
+                                tree.insertBefore(pdPage, nextPage);
+                            }
+
+                            ++pageToMoveIndex;
+                            ++segmentCount;
+
+                            if (segmentCount >= mo.segmentLength && mo.gapLength > 0) {
+                                targetPageIndex += mo.gapLength;
+                            }
+                            ++targetPageIndex;
+
+                        }
+                        this.pages.clear();
+                    }
+
+                    while (this.pages.size() < pageCount) {
+                        Page page = new Page(this, this.pages.size() + 1, pageCount);
+                        this.pages.add(page);
+                    }
+
+                    // Tell anyone, that a new document is loaded.
+                    fireLoaded = true;
+                } else if (this.error != null) {
+                    fireLoaded = true;
+                }
+            }
+        }
+        if (fireLoaded) {
+            fireDocumentLoaded();
+        }
     }
 
 
@@ -427,134 +477,6 @@ public class DocumentProxy {
             return Loader.loadPDF(os.toByteArray());
         } else
             return null;
-    }
-
-    protected class PdfLoadWorker extends SwingWorker<PDDocument, Void> {
-
-        protected boolean passwordNeeded = false;
-        protected final Path file;
-        protected final MergeOptions mo;
-        protected Consumer<PDDocument> consumer;
-
-        public PdfLoadWorker(Path file, MergeOptions mo, Consumer<PDDocument> consumer) {
-            this.file = file;
-            this.mo = mo;
-            this.consumer = consumer;
-        }
-
-        @Override
-        protected PDDocument doInBackground() {
-            try {
-                byte[] data = Files.readAllBytes(file);
-                PDDocument document = owerPassword4Load != null
-                        ? Loader.loadPDF(data, owerPassword4Load)
-                        : Loader.loadPDF(data);
-                error = null;
-                document.setAllSecurityToBeRemoved(true);
-                return document;
-            } catch (InvalidPasswordException ep) {
-                error = "File is encrypted and owner password\ndoesn't match";
-                passwordNeeded = true;
-                return null;
-            } catch (NoSuchFileException fe) {
-                error = String.format("File '%s' does not exist", file.getFileName());
-                return null;
-            } catch (Exception e) {
-                error = e.getMessage();
-                return null;
-            }
-        }
-
-        @Override
-        protected void done() {
-            try {
-                boolean fireLoaded = false;
-                int oldPageCount = -1;
-                synchronized (DocumentProxy.this) {
-                    Log.debug("DONE (%s)", file);
-                    currentLoader = null;
-                    PDDocument document = get();
-                    if (!DocumentProxy.this.closed) {
-                        if (passwordNeeded) {
-                            requestOwnerPassword(file, mo, consumer);
-                        } else {
-                            if (document != null) {
-                                if (consumer != null)
-                                    consumer.accept(document);
-
-                                int pageCount;
-                                if (DocumentProxy.this.document == null) {
-                                    DocumentProxy.this.document = document;
-                                    pages.clear();
-                                    pageCount = DocumentProxy.this.document.getNumberOfPages();
-                                } else {
-                                    // Append pages
-                                    try {
-                                        oldPageCount = DocumentProxy.this.document.getNumberOfPages();
-                                        PDFMergerUtility pdfMergerUtility = new PDFMergerUtility();
-                                        pdfMergerUtility.appendDocument(DocumentProxy.this.document, document);
-                                    } catch (Exception e) {
-                                        Log.error("Failed to merge. %s", e.getMessage());
-                                        oldPageCount = -1;
-                                    } finally {
-                                        IOUtils.closeQuietly(document);
-                                    }
-                                    pageCount = pages.size() + document.getNumberOfPages();
-                                }
-                                // zipper merge if requested
-                                if (mo.startPageNb > 0 && mo.startPageNb < oldPageCount) {
-                                    int targetPageIndex = mo.startPageNb - 1;
-                                    int segmentCount = 0;
-                                    int pageToMoveIndex = oldPageCount;
-                                    PDPageTree tree = DocumentProxy.this.document.getDocumentCatalog().getPages();
-
-                                    while (pageToMoveIndex < pageCount) {
-
-                                        PDPage pdPage = tree.get(pageToMoveIndex);
-                                        if (targetPageIndex > 0) {
-                                            PDPage prevPage = tree.get(targetPageIndex - 1);
-                                            tree.remove(pageToMoveIndex);
-                                            tree.insertAfter(pdPage, prevPage);
-                                        } else {
-                                            PDPage nextPage = tree.get(targetPageIndex);
-                                            tree.remove(pageToMoveIndex);
-                                            tree.insertBefore(pdPage, nextPage);
-                                        }
-
-                                        ++pageToMoveIndex;
-                                        ++segmentCount;
-
-                                        if (segmentCount >= mo.segmentLength && mo.gapLength > 0) {
-                                            targetPageIndex += mo.gapLength;
-                                        }
-                                        ++targetPageIndex;
-
-                                    }
-                                    pages.clear();
-                                }
-
-                                while (pages.size() < pageCount) {
-                                    Page page = new Page(DocumentProxy.this, pages.size() + 1, pageCount);
-                                    pages.add(page);
-                                }
-
-                                // Tell anyone, that a new document is loaded.
-                                fireLoaded = true;
-                            } else if (error != null) {
-                                fireLoaded = true;
-                            }
-                        }
-                    }
-                }
-                if (fireLoaded) {
-                    fireDocumentLoaded();
-                }
-            } catch (Exception e) {
-                error = e.getMessage();
-                fireDocumentLoaded();
-            }
-            startNextLoader();
-        }
     }
 
 }

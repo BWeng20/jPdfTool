@@ -1,9 +1,18 @@
-package com.bw.jPdfTool;
+package com.bw.jPdfTool.ui;
 
 import com.bw.jPdfTool.model.MergeOptions;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Box;
+import javax.swing.ButtonGroup;
+import javax.swing.JFileChooser;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JRadioButton;
+import javax.swing.JSpinner;
+import javax.swing.SpinnerNumberModel;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 
 public class MergeOptionPanel extends JPanel {
 

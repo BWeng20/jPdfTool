@@ -1,7 +1,7 @@
 package com.bw.jPdfTool.toast;
 
 import com.bw.jPdfTool.Log;
-import com.bw.jPdfTool.UI;
+import com.bw.jPdfTool.ui.UI;
 import com.formdev.flatlaf.ui.FlatLineBorder;
 
 import javax.swing.*;
@@ -11,7 +11,14 @@ import javax.swing.text.ParagraphView;
 import javax.swing.text.View;
 import javax.swing.text.ViewFactory;
 import javax.swing.text.html.HTMLEditorKit;
-import java.awt.*;
+import java.awt.AWTEvent;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
+import java.awt.Toolkit;
 import java.awt.event.MouseEvent;
 
 /**

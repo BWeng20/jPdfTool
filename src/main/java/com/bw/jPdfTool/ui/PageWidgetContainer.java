@@ -1,13 +1,20 @@
-package com.bw.jPdfTool;
+package com.bw.jPdfTool.ui;
 
+import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.Preferences;
 import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.model.Page;
 import org.apache.pdfbox.pdmodel.PDDocument;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JScrollPane;
+import javax.swing.SwingUtilities;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
-import java.awt.*;
+import java.awt.Dimension;
+import java.awt.Insets;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;

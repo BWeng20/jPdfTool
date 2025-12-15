@@ -1,6 +1,8 @@
-package com.bw.jPdfTool;
+package com.bw.jPdfTool.ui;
 
-import javax.swing.*;
+import com.bw.jPdfTool.Preferences;
+
+import javax.swing.JCheckBoxMenuItem;
 
 /**
  * A Menu Checkbox that is bound to a boolean preferences values.

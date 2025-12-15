@@ -1,14 +1,22 @@
-package com.bw.jPdfTool;
+package com.bw.jPdfTool.ui;
 
+import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.Main;
+import com.bw.jPdfTool.Preferences;
+import com.bw.jPdfTool.SignatureTool;
 import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.model.MergeOptions;
 import com.bw.jPdfTool.model.Page;
+import com.bw.jPdfTool.model.RenderQueue;
 import com.bw.jPdfTool.toast.Toast;
 import com.bw.jPdfTool.toast.ToastType;
 import com.bw.jPdfTool.toast.Toaster;
 import com.bw.jtools.svg.SVGConverter;
 import com.bw.jtools.ui.ShapeIcon;
+import com.bw.jtools.ui.ShapeMultiResolutionImage;
 import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.fonts.roboto.FlatRobotoFont;
+import com.formdev.flatlaf.util.SystemInfo;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.multipdf.Splitter;
 import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
@@ -30,19 +38,34 @@ import java.awt.dnd.DropTargetDropEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
-import java.io.*;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Deque;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Main panel to show the pdf tool. Wrap this panel into a frame to create an app.
  * See {@link Main#main(String[])}.
  */
 public class UI extends JSplitPane {
+
+    public static JFrame mainWindow;
 
     private static final Map<String, Icon> icons = new HashMap<>();
 
@@ -131,6 +154,9 @@ public class UI extends JSplitPane {
     private final JButton splitDocument = new JButton("Split Document");
 
     protected final RenderQueue renderQueue = new RenderQueue();
+
+    protected final Deque<UIPdfLoadWorker> loadWorker = new ArrayDeque<>();
+    protected UIPdfLoadWorker currentLoader;
 
     public void handleDrop(DropTargetDropEvent dtde, boolean append) {
         try {
@@ -1179,7 +1205,44 @@ public class UI extends JSplitPane {
             prefs.remove(Preferences.USER_PREF_USER_PASSWORD);
             prefs.remove(Preferences.USER_PREF_SIG_PASSWORD);
         }
+    }
 
+    /**
+     * Triggers loading of the document in background
+     */
+    protected synchronized void load(Path file, MergeOptions mo, Consumer<PDDocument> r) {
+        documentProxy.ensuredNotClosed();
+        synchronized (this) {
+            String pw = ownerPasswordField.getText().trim();
+            if (pw.isEmpty())
+                pw = null;
+
+            UIPdfLoadWorker lw = new UIPdfLoadWorker(documentProxy, file, pw, mo, r);
+            loadWorker.addLast(lw);
+            startNextLoader();
+        }
+    }
+
+
+    /**
+     * Starts the next background loader task.
+     * Document for document and if all documents are loaded, renders all pages.<br>
+     * This is done parallel to the UI that shows the known pages.
+     */
+    protected synchronized void startNextLoader() {
+        if (currentLoader == null) {
+            currentLoader = loadWorker.pollFirst();
+            if (currentLoader != null)
+                currentLoader.execute();
+            else if (documentProxy.getDocument() != null) {
+                int pageCount = documentProxy.getDocument().getNumberOfPages();
+                while (documentProxy.pages.size() < pageCount) {
+                    Page page = new Page(documentProxy, documentProxy.pages.size() + 1, pageCount);
+                    documentProxy.pages.add(page);
+                }
+                renderQueue.addDocument(documentProxy);
+            }
+        }
     }
 
     /**
@@ -1415,11 +1478,10 @@ public class UI extends JSplitPane {
             if (parent != null)
                 Preferences.getInstance().set(Preferences.USER_PREF_LAST_PDF_DIR, parent);
 
-            documentProxy.setOwnerPassword(ownerPasswordField.getText());
             final String fileName = file.getName();
             Toast toast = toaster.toast("<html><b>Appending…</b><br>%s</html>", fileName);
             long start = System.currentTimeMillis();
-            documentProxy.load(file.toPath(), mo, document -> {
+            load(file.toPath(), mo, document -> {
                 if (toast != null)
                     toast.setMessage(String.format("<html><b>Appended (%d ms):</b><br>%s</html>",
                             System.currentTimeMillis() - start,
@@ -1434,14 +1496,14 @@ public class UI extends JSplitPane {
     public void setBusy(boolean busy) {
         if (this.busy != busy) {
             this.busy = busy;
-            Main.mainWindow.setCursor(Cursor.getPredefinedCursor(busy ? Cursor.WAIT_CURSOR : Cursor.DEFAULT_CURSOR));
+            UI.mainWindow.setCursor(Cursor.getPredefinedCursor(busy ? Cursor.WAIT_CURSOR : Cursor.DEFAULT_CURSOR));
             if (glassPane == null) {
                 glassPane = new JPanel();
                 glassPane.setOpaque(false);
                 glassPane.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
                 glassPane.addMouseListener(new MouseAdapter() {
                 }); // Block mouse events
-                Main.mainWindow.setGlassPane(glassPane);
+                UI.mainWindow.setGlassPane(glassPane);
 
                 glassPane.setVisible(busy);
             }
@@ -1466,8 +1528,6 @@ public class UI extends JSplitPane {
 
         if (selectedFile != null) {
             documentProxy = new DocumentProxy(renderQueue);
-            documentProxy.setOwnerPassword(ownerPasswordField.getText());
-
             documentProxy.addDocumentConsumer(new DocumentProxy.DocumentConsumer() {
 
                 @Override
@@ -1497,7 +1557,7 @@ public class UI extends JSplitPane {
                 final String fileName = selectedFile.getName();
                 Toast toast = toaster.toast("<html><b>Loading…</b><br><font size='+1'>%s</font></html>", fileName);
                 long start = System.currentTimeMillis();
-                documentProxy.load(selectedFile.toPath(), new MergeOptions(), document -> {
+                load(selectedFile.toPath(), new MergeOptions(), document -> {
                     if (toast != null)
                         toast.setMessage(String.format("<html><b>Loaded (%d ms):</b><br>%s</html>",
                                 System.currentTimeMillis() - start, fileName));
@@ -1674,6 +1734,58 @@ public class UI extends JSplitPane {
         }
         pageImageViewer.setPage(page);
         imageExtractorDialog.setVisible(true);
+    }
+
+    /**
+     * Creates the user interface
+     *
+     * @param files Optional files.
+     */
+    public static void createUI(List<Path> files) {
+
+        SwingUtilities.invokeLater(() -> {
+
+            FlatRobotoFont.installLazy();
+            if (SystemInfo.isLinux) {
+                JFrame.setDefaultLookAndFeelDecorated(true);
+                JDialog.setDefaultLookAndFeelDecorated(true);
+            }
+
+            String lafClassName = UI.getPref(Preferences.USER_PREF_LAF, Preferences.DEFAULT_LAF);
+            try {
+                UIManager.setLookAndFeel(lafClassName);
+            } catch (Exception e) {
+                System.err.println("Failed to set LAF " + lafClassName);
+            }
+
+            UIManager.put("Panel.arc", 8);
+            UI ui = new UI();
+
+            UI.mainWindow = new JFrame("PDF Passwords & Rights");
+
+            try {
+                ShapeMultiResolutionImage icon = new ShapeMultiResolutionImage(
+                        SVGConverter.convert(Main.class.getResourceAsStream("/icon.svg"))
+                );
+                UI.mainWindow.setIconImage(icon);
+            } catch (Exception ignored) {
+            }
+            UI.mainWindow.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+
+            UI.mainWindow.setJMenuBar(ui.getMenu());
+            UI.mainWindow.setLocationByPlatform(true);
+            ui.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+            UI.mainWindow.setContentPane(ui);
+            UI.mainWindow.pack();
+            UI.mainWindow.setVisible(true);
+
+            if (!files.isEmpty()) {
+                MergeOptions mo = new MergeOptions();
+                ui.selectPdf(files.get(0).toFile());
+                for (int i = 1; i < files.size(); ++i)
+                    ui.appendPdf(files.get(i).toFile(), mo);
+            }
+        });
     }
 
 }

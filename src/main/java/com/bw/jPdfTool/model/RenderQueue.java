@@ -1,16 +1,12 @@
-package com.bw.jPdfTool;
+package com.bw.jPdfTool.model;
 
-import com.bw.jPdfTool.model.DocumentProxy;
-import com.bw.jPdfTool.model.Page;
+import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.Preferences;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
 
-import javax.swing.*;
-import java.awt.*;
+import java.awt.RenderingHints;
 import java.beans.PropertyChangeListener;
-import java.util.ArrayList;
-import java.util.LinkedList;
-import java.util.List;
 import java.util.concurrent.LinkedBlockingDeque;
 
 /**
@@ -108,27 +104,8 @@ public class RenderQueue {
             }
         }
 
-        private boolean notificationTriggered = false;
-        private final List<Page> renderedPages = new LinkedList<>();
-
         private void pageRendered(Page page) {
-            synchronized (renderedPages) {
-                renderedPages.add(page);
-                if (!notificationTriggered) {
-                    SwingUtilities.invokeLater(() -> {
-                        List<Page> pages;
-                        synchronized (renderedPages) {
-                            notificationTriggered = false;
-                            pages = new ArrayList<>(renderedPages);
-                            renderedPages.clear();
-                        }
-                        Log.debug("%d pages finished", pages.size());
-                        for (Page p : pages) {
-                            page.document.firePageRendered(p);
-                        }
-                    });
-                }
-            }
+            page.document.firePageRendered(page);
         }
     }
 }

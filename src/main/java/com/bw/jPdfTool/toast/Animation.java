@@ -1,7 +1,7 @@
 package com.bw.jPdfTool.toast;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Timer;
+import java.awt.Point;
 import java.awt.geom.Point2D;
 
 public class Animation {

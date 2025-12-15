@@ -1,4 +1,4 @@
-package com.bw.jPdfTool;
+package com.bw.jPdfTool.ui;
 
 import com.bw.jPdfTool.model.Page;
 
