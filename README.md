@@ -6,12 +6,13 @@ My old Brother scanner had this feature - plus other useful tools - and (by the 
 Rather than paying for Adobe or other commercial solutions, I turned to the PDFBox documentation. <br>
 I had used PDFBox in previous commercial projects, though I’d never dealt with PDF protection before.
 
-Thirty minutes later, the first version was up and running, and I sent the email. 
-
+Thirty minutes later, the first version was up and running, and I sent the email.<br>
 The following days were spent adding fancy features to the UI and the build system - just for fun.
 
 
 ## Current Features
+
+![Screenshot](doc/Screenshot%20Release2.0.png)
 
 ### 📄 Load a PDF
 
@@ -25,7 +26,6 @@ Add additional PDFs and either mix pages or append them sequentially.
 
 You can set either an owner or a user password if specific permissions aren't required.<br>
 Both options provide basic encryption and restrict viewing access.<p>
-If you need dedicated permission, you have to set both passwords. 
 
 ### 🗜️ Enable/Disable Compression
 
@@ -33,8 +33,8 @@ Toggle compression to optimize file size.
 
 ### ✅ Set Permissions
 
-Permissions only take effect when both owner and user passwords are set.<br>
-The UI automatically disables permission checkboxes unless both passwords are provided.
+Permissions only take effect when a owner password is set.<br>
+The UI automatically disables permission checkboxes unless the password is provided.
 
 ### 🧹 Remove & Rearrange Pages
 
@@ -82,4 +82,47 @@ A `.p12` file with an X.509 certificate is required.
 
 E-mail me if I missed important features. 
 
-![Screenshot](doc/Screenshot%20Release2.0.png)
+## 💻 Supported Operating Systems 
+
+Distributions are currently only created for **MS Windows**.
+
+The OS-dependent components are only the starter executable and the bundled JRE, designed to make it easy for Windows users.
+
+The included JAR files in the `lib` folder should run on **any operating system with Java installed**.
+
+For example, on **Linux** or **macOS**, you can run the application using the following command:
+
+```console
+java -cp "$(printf %s: lib/*.jar)" com.bw.jPdfTool.Main
+```
+
+This command simply adds all JARs in the lib folder to the classpath. 
+The main class is `com.bw.jPdfTool.Main`. 
+Calling it without any arguments will launch the **Graphical User Interface (GUI)**.
+
+
+## ⚙️ Command Line Interface (CLI)
+
+In case you need to call the tool from a **CI/CD Pipeline** or script, 
+you can use the CLI. I assume you have a basic understanding of command-line operations.
+
+**Prerequisites:**
++ Your shell (e.g. Bash) is currently in the distribution root directory.
++ You have a **Java Runtime Environment (JRE)** installed - _see below for **headless** environments_.
+
+To show the usage information of the CLI, use:
+
+```console
+java -cp "$(printf %s: lib/*.jar)" com.bw.jPdfTool.Main -h
+```
+
+**Note:** The CLI currently supports only a subset of the tool's total functionality.<br>
+Feel free to ask in case you need special functionality.
+
+### Headless Environment Considerations
+Because the tool uses **PDFBox** for all the magic, there are special considerations for headless environments:
++ **GUI is not created for CLI:** If the CLI is used, the User Interface is not created, so it should run on a headless system (a server without a display).
++ **AWT Dependency:** PDFBox internally uses some **Abstract Window Toolkit (AWT)** classes. These classes may require a **full JRE** to work, even if the application is running "off-screen" without a physical display installed.
++ **Pure Headless JRE Risk:** A _pure_ headless JRE might throw an error when an AWT class is instantiated. While you might use the CLI on a headless system, using a JRE specifically configured as _purely_ headless may be problematic.
+
+**Recommendation:** Try running it. Success depends on the specific headless JRE implementation you are using.

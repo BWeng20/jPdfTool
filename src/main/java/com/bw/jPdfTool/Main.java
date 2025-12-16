@@ -66,12 +66,18 @@ public class Main implements Callable<Integer> {
     @Option(names = {"-cma", "--canModifyAnnotations"}, negatable = true, defaultValue = "false", description = "User shall be able to modify annotations.")
     private boolean canModifyAnnotations = false;
 
+    @Option(names = {"-h", "--help"}, usageHelp = true, description = "Display this help message and exit.")
+    private boolean helpRequested = false;
+
     @Spec
     private CommandSpec spec;
 
     @Override
     public Integer call() {
         this.cli = true;
+
+        if (helpRequested)
+            return 0;
 
         if (this.out != null) {
             this.outfile = Paths.get(this.out);
@@ -102,12 +108,16 @@ public class Main implements Callable<Integer> {
         return cli;
     }
 
+    public boolean isHelpRequested() {
+        return helpRequested;
+    }
+
     public static void main(String[] args) {
 
         Main main = new Main();
         if (args.length > 0) {
             int exitCode = new CommandLine(main).execute(args);
-            if (exitCode != 0)
+            if (exitCode != 0 || main.helpRequested)
                 System.exit(exitCode);
             else
                 System.exit(main.executeCommands());

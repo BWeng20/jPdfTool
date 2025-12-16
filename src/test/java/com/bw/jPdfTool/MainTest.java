@@ -13,6 +13,15 @@ import java.util.Objects;
 class MainTest {
 
     @Test
+    void test_help() {
+        Main main = new Main();
+        int exitCode = new CommandLine(main).execute("-h");
+        Assertions.assertEquals(0, exitCode);
+        Assertions.assertTrue(main.isHelpRequested());
+    }
+
+
+    @Test
     void test_append() {
 
         Assertions.assertDoesNotThrow(() -> {
