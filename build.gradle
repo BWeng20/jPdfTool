@@ -11,6 +11,10 @@ repositories {
     mavenCentral()
 }
 
+ext {
+    junitVersion = '5.8.1'
+}
+
 java {
     modularity.inferModulePath = true
 }
@@ -29,8 +33,12 @@ dependencies {
     implementation 'org.apache.pdfbox:fontbox:3.0.2'
     implementation 'commons-logging:commons-logging:1.2'
 
-    testImplementation platform('org.junit:junit-bom:5.10.0')
-    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation "org.junit.jupiter:junit-jupiter-api:${junitVersion}"
+    testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:${junitVersion}"
+}
+
+test {
+    useJUnitPlatform()
 }
 
 javadoc.options.addStringOption('Xdoclint:none', '-quiet')

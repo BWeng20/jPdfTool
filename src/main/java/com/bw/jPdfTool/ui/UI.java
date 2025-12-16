@@ -1314,7 +1314,7 @@ public class UI extends JSplitPane {
 
                     // toaster.toast("<html>Stored as<br><font size='+1'><i>%s</i></font></html>", selectedFilePath.getFileName());
                     JOptionPane.showOptionDialog(this,
-                            "<html><font size='+1'>Stored PDF as<p><b>" + selectedFilePath + "</b></font><p></html>", "Stored",
+                            "<html><font size='+1'>The PDF was saved in<br><br><b>" + selectedFilePath + "</b><br><br></font></html>", "Stored",
                             JOptionPane.DEFAULT_OPTION,
                             JOptionPane.INFORMATION_MESSAGE, null, options.toArray(), null);
 

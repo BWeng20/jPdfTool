@@ -13,6 +13,9 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.function.Consumer;
 
+/**
+ * PDF load worker for CLI (not concurrently).
+ */
 public class CliPdfLoader implements PdfLoadWorker {
 
     private final DocumentProxy documentProxy;
@@ -37,7 +40,6 @@ public class CliPdfLoader implements PdfLoadWorker {
                     ? Loader.loadPDF(data, ownerPassword)
                     : Loader.loadPDF(data);
             documentProxy.error = null;
-            document.setAllSecurityToBeRemoved(true);
         } catch (InvalidPasswordException ep) {
             documentProxy.error = "File is encrypted and owner password\ndoesn't match";
         } catch (NoSuchFileException fe) {
@@ -59,7 +61,6 @@ public class CliPdfLoader implements PdfLoadWorker {
             documentProxy.error = e.getMessage();
             documentProxy.fireDocumentLoaded();
         }
-        documentProxy.startNextLoader();
     }
 
     @Override

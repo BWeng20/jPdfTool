@@ -20,7 +20,7 @@ public class Main {
 
         main.parseArguments(args);
         if (main.cli) {
-            main.executeCommands();
+            System.exit( main.executeCommands() );
         } else {
             main.createUI();
         }
@@ -73,20 +73,24 @@ public class Main {
     // TODO: Add cli for that
     private char[] signaturePassword;
 
+    public boolean isCli() {
+        return cli;
+    }
+
     protected void usage() {
     }
 
-    protected void executeCommands() {
+    protected int executeCommands() {
 
         if (files.isEmpty()) {
             System.err.println("No file arguments given");
             usage();
-            System.exit(2);
+            return 2;
         }
         if (outfile == null) {
             System.err.println("No output file given");
             usage();
-            System.exit(3);
+            return 3;
         }
         try {
 
@@ -113,9 +117,9 @@ public class Main {
 
         } catch (Exception e) {
             e.printStackTrace();
-            System.exit(1);
+            return 1;
         }
-        System.exit(0);
+        return 0;
     }
 
     protected void createUI() {
