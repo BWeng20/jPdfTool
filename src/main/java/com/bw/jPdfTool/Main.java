@@ -22,7 +22,7 @@ import java.util.concurrent.Callable;
 /**
  * CLI interface. Accepts file names as arguments and opens the UI or executes commands headless.
  */
-@Command(name = "jPdfTool", mixinStandardHelpOptions = true, version = "jPdfBox 2.0",
+@Command(name = "jPdfTool", mixinStandardHelpOptions = true, version = "jPdfBox 2.1",
         footer = {
                 "",
                 "Permission flags have only effect if owner- or user-password is given.",
@@ -70,7 +70,7 @@ public class Main implements Callable<Integer> {
     private CommandSpec spec;
 
     @Override
-    public Integer call(){
+    public Integer call() {
         this.cli = true;
 
         if (this.out != null) {
