@@ -3,6 +3,7 @@ package com.bw.jPdfTool;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import picocli.CommandLine;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,14 +26,14 @@ class MainTest {
 
 
             Main main = new Main();
-            main.parseArguments(new String[]{
-                    "-orginalpassword", "testOwner",
-                    "-ownerpassword", "testOwner2",
-                    "-userpassword", "testUser",
+            int exitCode = new CommandLine(main).execute("-pw", "testOwner",
+                    "-upw", "test123",
+                    "--no-canPrint",
                     "-out", outPdf.toString()
                     , testPdf.toString()
-                    , testPdf.toString()
-            });
+                    , testPdf.toString());
+            Assertions.assertEquals(0, exitCode);
+
             Assertions.assertTrue(main.isCli());
             int code = main.executeCommands();
             Assertions.assertEquals(0, code);

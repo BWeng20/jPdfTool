@@ -13,6 +13,7 @@ repositories {
 
 ext {
     junitVersion = '5.8.1'
+    picocliVersion = '4.7.7'
 }
 
 java {
@@ -32,6 +33,9 @@ dependencies {
     implementation 'org.apache.pdfbox:pdfbox:3.0.2'
     implementation 'org.apache.pdfbox:fontbox:3.0.2'
     implementation 'commons-logging:commons-logging:1.2'
+
+    implementation("info.picocli:picocli:${picocliVersion}")
+    annotationProcessor("info.picocli:picocli-codegen:${picocliVersion}")
 
     testImplementation "org.junit.jupiter:junit-jupiter-api:${junitVersion}"
     testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:${junitVersion}"

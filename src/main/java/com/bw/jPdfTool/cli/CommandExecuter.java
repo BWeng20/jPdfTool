@@ -61,7 +61,7 @@ public class CommandExecuter {
                      Path signatureKeyPath, char[] signatureKeyPwd
     ) throws Exception {
         if (documentProxy != null && documentProxy.getDocument() != null) {
-            PDDocument document = documentProxy.getDocument();
+            PDDocument document = documentProxy.getCopy();
             try {
                 final boolean doSign = signatureKeyPath != null;
 
@@ -91,7 +91,6 @@ public class CommandExecuter {
             } finally {
                 if (document != null)
                     document.close();
-
             }
         }
     }
@@ -105,4 +104,9 @@ public class CommandExecuter {
         }
     }
 
+    public void close() {
+        if ( documentProxy != null) {
+            documentProxy.close();
+        }
+    }
 }
