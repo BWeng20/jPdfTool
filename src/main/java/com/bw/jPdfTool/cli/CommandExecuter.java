@@ -37,7 +37,7 @@ public class CommandExecuter {
     /**
      * Loads all files.
      */
-    public void loadDocuments(String password2Load) {
+    public void loadDocuments(String password2Load, MergeOptions mo) {
 
         if (documentProxy != null)
             documentProxy.close();
@@ -46,10 +46,13 @@ public class CommandExecuter {
         RenderQueue renderQueue = new RenderQueue();
         documentProxy = new DocumentProxy(renderQueue);
 
+        if (mo == null)
+            mo = new MergeOptions();
+
         // TODO: We could use multiple threads here, but for now keep it simple.
         // TODO: Support setting MergeOptions from arguments.
         for (Path p : files) {
-            CliPdfLoader lw = new CliPdfLoader(documentProxy, p, new MergeOptions(), password2Load);
+            CliPdfLoader lw = new CliPdfLoader(documentProxy, p, mo, password2Load);
             lw.execute();
         }
     }

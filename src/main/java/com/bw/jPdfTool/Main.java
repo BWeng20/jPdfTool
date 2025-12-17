@@ -1,6 +1,7 @@
 package com.bw.jPdfTool;
 
 import com.bw.jPdfTool.cli.CommandExecuter;
+import com.bw.jPdfTool.model.MergeOptions;
 import com.bw.jPdfTool.ui.UI;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import picocli.CommandLine;
@@ -71,6 +72,10 @@ public class Main implements Callable<Integer> {
 
     @Option(names = {"-h", "--help"}, usageHelp = true, description = "Display this help message and exit.")
     private boolean helpRequested = false;
+
+    @Option(names = {"-m", "--merge"}, paramLabel = "<start>-<amount>-<skip>", description =
+            "Zipper merge instead of append. '5-2-3' will start before page 5 of the current document, inserts 2 pages of the new document, then skip 3 pages, then inserts again 2 pages, skip again 3 e.t.c. until all new pages are added.")
+    private String mergeOptions = "";
 
     @Spec
     private CommandSpec spec;
@@ -152,9 +157,29 @@ public class Main implements Callable<Integer> {
         }
         CommandExecuter executer = new CommandExecuter(files);
         try {
+            MergeOptions mo = null;
+            if (!mergeOptions.isEmpty()) {
+                String[] mergeParams = mergeOptions.split("-");
+                if (mergeParams.length != 3) {
+                    System.err.println("error in '-merge' argument.");
+                    usage(System.err);
+                    return 4;
+                }
+                mo = new MergeOptions();
+                try {
+                    mo.startPageNb = Integer.parseInt(mergeParams[0]);
+                    mo.segmentLength = Integer.parseInt(mergeParams[1]);
+                    mo.gapLength = Integer.parseInt(mergeParams[2]);
+                } catch (NumberFormatException ne) {
+                    System.err.println("illegal number in '-merge' argument.");
+                    usage(System.err);
+                    return 5;
+                }
+                System.out.println("Merging " + mo);
+            }
 
             // TODO: Currently all input files are merged and protected.
-            executer.loadDocuments(password2Load);
+            executer.loadDocuments(password2Load, mo);
 
             AccessPermission ap = new AccessPermission();
             ap.setCanPrint(canPrint);

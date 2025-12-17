@@ -17,4 +17,8 @@ public final class MergeOptions {
      */
     public int gapLength = -1;
 
+    @Override
+    public String toString() {
+        return ""+startPageNb+"/"+segmentLength+"/"+gapLength;
+    }
 }

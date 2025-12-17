@@ -56,6 +56,41 @@ class MainTest {
     }
 
     @Test
+    void test_merge() {
+        Assertions.assertDoesNotThrow(() -> {
+
+            Path testPdf = Paths.get(Objects.requireNonNull(MainTest.class.getResource("/Test.pdf")).toURI());
+
+            long orgFileSize = Files.size(testPdf);
+            System.out.println("Using File: " + testPdf + " size " + orgFileSize + " bytes");
+
+            Path outPdf = Files.createTempFile("jPdfToolTest", ".pdf");
+
+            Main main = new Main();
+            int exitCode = new CommandLine(main).execute("-pw", "testOwner",
+                    "-upw", "test123",
+                    "--no-canPrint",
+                    "-out", outPdf.toString()
+                    , "-m", "1-1-2"
+                    , testPdf.toString()
+                    , testPdf.toString());
+            Assertions.assertEquals(0, exitCode);
+
+            Assertions.assertTrue(main.isCli());
+            int code = main.executeCommands();
+            Assertions.assertEquals(0, code);
+
+            long newFileSize = Files.size(outPdf);
+            System.out.println("Created File: " + outPdf + " size " + newFileSize + " bytes");
+
+            Assertions.assertTrue(Files.exists(outPdf));
+            Assertions.assertTrue(newFileSize > orgFileSize);
+
+            Files.delete(outPdf);
+        });
+    }
+
+    @Test
     void test_split() {
         Assertions.assertDoesNotThrow(() -> {
             Path testPdf = Paths.get(Objects.requireNonNull(MainTest.class.getResource("/Test.pdf")).toURI());
