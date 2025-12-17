@@ -77,6 +77,14 @@ public class Main implements Callable<Integer> {
             "Zipper merge instead of append. '5-2-3' will start before page 5 of the current document, inserts 2 pages of the new document, then skip 3 pages, then inserts again 2 pages, skip again 3 e.t.c. until all new pages are added.")
     private String mergeOptions = "";
 
+    @Option(names = {"-cert", "--certificate"}, paramLabel = "<p12 file>", description =
+            "Signs the resulting PDF with a certificate from a p12 file.")
+    private String signCertFile = null;
+
+    @Option(names = {"-cpw", "--certificatePassword"}, paramLabel = "<password for p12 file>", description =
+            "Password for the certificate.")
+    private String signCertPassword = null;
+
     @Spec
     private CommandSpec spec;
 
@@ -91,12 +99,24 @@ public class Main implements Callable<Integer> {
             this.outfile = Paths.get(this.out);
         }
 
+        if (signCertFile != null) {
+            signatureFile = Paths.get(signCertFile);
+            if (!Files.exists(signatureFile)) {
+                System.err.printf("File '%s' doesn't exists.\n", signatureFile);
+                return 10;
+            }
+        }
+
+        if (signCertPassword != null)
+            signaturePassword = signCertPassword.toCharArray();
+        signCertPassword = null;
+
         for (String f : fileArguments) {
             Path p = Paths.get(f);
             if (Files.exists(p))
                 this.files.add(p);
             else {
-                Log.error("File '%s' doesn't exists.", f);
+                System.err.printf("File '%s' doesn't exists.\n", f);
             }
         }
         return 0;
@@ -107,9 +127,7 @@ public class Main implements Callable<Integer> {
     private Path outfile;
     private final List<Path> files = new ArrayList<>();
 
-    // TODO: Add cli for that
-    private Path signaturefile;
-    // TODO: Add cli for that
+    private Path signatureFile;
     private char[] signaturePassword;
 
     public boolean isCli() {
@@ -201,11 +219,11 @@ public class Main implements Callable<Integer> {
             if (this.splitToPagesPerFile > 0) {
                 executer.split(this.splitToPagesPerFile,
                         ownerpassword, userpassword, ap, encryptionKeyLength, outfile,
-                        signaturefile, signaturePassword);
+                        signatureFile, signaturePassword);
 
             } else {
                 executer.save(ownerpassword, userpassword, ap, encryptionKeyLength, outfile,
-                        signaturefile, signaturePassword);
+                        signatureFile, signaturePassword);
             }
 
 
