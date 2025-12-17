@@ -2,10 +2,13 @@ plugins {
     id 'java'
     id 'application'
     id 'edu.sc.seis.launch4j' version '4.0.0'
+    id 'org.asciidoctor.jvm.convert' version '3.3.2'
+    id 'org.asciidoctor.jvm.pdf' version '3.3.2'
 }
 
 group = 'io.github.bweng20'
 version = '2.1'
+
 
 repositories {
     mavenCentral()
@@ -51,11 +54,48 @@ application {
     mainClass = 'com.bw.jPdfTool.Main'
 }
 
+tasks.register('copyPngs', Copy) {
+    from layout.projectDirectory.dir("doc")
+    include("*.png")
+    into layout.buildDirectory.dir("doc/doc")
+}
+
+
+tasks.register('copyDoc', Copy) {
+    dependsOn(copyPngs)
+    from layout.projectDirectory.file("README.adoc")
+    into layout.buildDirectory.dir("doc")
+}
+
+pdfThemes {
+    local 'basic', {
+        themeDir = file('src/docs/themes')
+        themeName = 'basic'
+    }
+}
+
+
+asciidoctorPdf {
+    dependsOn(copyDoc)
+    attributes 'pdf-themesdir': "${projectDir}/src/docs/themes",
+            'pdf-theme': 'basic', // Matches 'custom-theme.yml'
+            'pdf-fontsdir': "${projectDir}/src/docs/themes/fonts"
+
+    asciidoctorj {
+        options 'verbose': true
+    }
+
+    sourceDir  file('build/doc')
+    sources {
+        include 'README.adoc'
+    }
+    outputDir  file('build/doc/pdf')
+
+}
 
 tasks.register('cleanJreDir', Delete) {
     delete layout.buildDirectory.dir("jre").get()
 }
-
 
 tasks.register('jlink', Exec) {
     dependsOn cleanJreDir
@@ -91,6 +131,7 @@ tasks.register('distZipWithJre', Zip) {
     group = "distribution"
     dependsOn(jlink)
     dependsOn(createExe)
+    dependsOn(asciidoctorPdf)
     from('build/launch4j')
     from('build/jre') {
         into 'jre'
@@ -98,6 +139,10 @@ tasks.register('distZipWithJre', Zip) {
     from('build/libs') {
         include '*.jar'
         into 'lib'
+    }
+    from('build/doc/pdf') {
+        include '*.pdf'
+        into 'doc'
     }
     archiveFileName = "jPdfTool-${project.version}-jre.zip"
     destinationDirectory = layout.buildDirectory.dir("distributions").get()

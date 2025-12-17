@@ -1,0 +1,11 @@
+font:
+  catalog:
+    RobotoFont:
+      normal: Roboto-Regular.ttf
+      bold: Roboto-Bold.ttf
+      italic: Roboto-Italic.ttf
+      bold_italic: Roboto-BoldItalic.ttf
+page:
+  layout: portrait
+base:
+  font_family: RobotoFont
