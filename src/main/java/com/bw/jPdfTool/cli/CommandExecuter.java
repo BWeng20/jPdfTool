@@ -1,10 +1,12 @@
 package com.bw.jPdfTool.cli;
 
+import com.bw.jPdfTool.Log;
 import com.bw.jPdfTool.SignatureTool;
 import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.model.MergeOptions;
 import com.bw.jPdfTool.model.RenderQueue;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.multipdf.Splitter;
 import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
@@ -16,6 +18,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -52,6 +55,64 @@ public class CommandExecuter {
     }
 
     /**
+     * Split the effective document.
+     * The document is closed during the call.
+     */
+    public void split(int pagePerDocument,
+                      String ownerPwd, String userPwd,
+                      AccessPermission ap, int encryptionKeyLength,
+                      Path baseFileName,
+                      Path signatureKeyPath, char[] signatureKeyPwd) throws Exception {
+
+        if (documentProxy != null && documentProxy.getDocument() != null) {
+            PDDocument document = documentProxy.getCopy();
+            final boolean doSign = signatureKeyPath != null;
+            try {
+                String fprefix;
+                String fpostfix;
+                String fname = baseFileName.getFileName().toString();
+                int idx = fname.lastIndexOf('.');
+                if (idx < 0) {
+                    fprefix = baseFileName.toAbsolutePath().toString();
+                    fpostfix = ".pdf";
+                } else {
+                    fprefix = baseFileName.toAbsolutePath().getParent().resolve(fname.substring(0, idx)).toString();
+                    fpostfix = fname.substring(idx);
+                }
+
+                int fileCount = 0;
+                String alias = null;
+                SignatureTool createSignature = null;
+
+                if (doSign) {
+                    createSignature = new SignatureTool();
+                    try (InputStream is = Files.newInputStream(signatureKeyPath)) {
+                        alias = createSignature.addKey(is, signatureKeyPwd);
+                    }
+                }
+
+                final PDDocument source = documentProxy.getCopy();
+                Splitter splitter = new Splitter();
+                splitter.setSplitAtPage(pagePerDocument);
+                List<PDDocument> splittedDocs = splitter.split(source);
+                for (PDDocument doc : splittedDocs) {
+                    String docFile = String.format("%s%03d%s", fprefix, ++fileCount, fpostfix);
+                    if (doSign) {
+                        saveDocument(doc, ownerPwd, userPwd, ap, encryptionKeyLength, Paths.get(docFile), createSignature, alias, signatureKeyPwd);
+                    } else {
+                        saveDocument(doc, ownerPwd, userPwd, ap, encryptionKeyLength, Paths.get(docFile), null, null, null);
+                    }
+                    Log.info("Stored file '%s'", docFile);
+                }
+                source.close();
+            } finally {
+                if (document != null)
+                    document.close();
+            }
+        }
+    }
+
+    /**
      * Save the effective document.
      * The document is closed during the call.
      */
@@ -62,50 +123,63 @@ public class CommandExecuter {
     ) throws Exception {
         if (documentProxy != null && documentProxy.getDocument() != null) {
             PDDocument document = documentProxy.getCopy();
-            try {
-                final boolean doSign = signatureKeyPath != null;
+            final boolean doSign = signatureKeyPath != null;
+            if (doSign) {
+                SignatureTool createSignature = new SignatureTool();
 
-                if ((!ownerPwd.isEmpty()) || (!userPwd.isEmpty())) {
-                    StandardProtectionPolicy spp = new StandardProtectionPolicy(ownerPwd, userPwd, ap);
-                    spp.setEncryptionKeyLength(encryptionKeyLength);
-                    document.protect(spp);
-
-                    if (doSign) {
-                        // For some reason the encryption breaks if we sign fresh protected document.
-                        // If we reload it (in protected state) it works.
-                        ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
-                        document.save(os, CompressParameters.NO_COMPRESSION);
-                        document.close();
-                        document = Loader.loadPDF(os.toByteArray(), ownerPwd.isEmpty() ? userPwd : ownerPwd);
-                    }
+                String alias;
+                try (InputStream is = Files.newInputStream(signatureKeyPath)) {
+                    alias = createSignature.addKey(is, signatureKeyPwd);
                 }
+                saveDocument(document, ownerPwd, userPwd, ap, encryptionKeyLength, file, createSignature, alias, signatureKeyPwd);
 
-                try (OutputStream os = new BufferedOutputStream(Files.newOutputStream(file))) {
-                    if (doSign) {
-                        sign(document, signatureKeyPath, signatureKeyPwd);
-                        document.saveIncremental(os);
-                    } else {
-                        document.save(os);
-                    }
-                }
-            } finally {
-                if (document != null)
-                    document.close();
+            } else {
+                saveDocument(document, ownerPwd, userPwd, ap, encryptionKeyLength, file, null, null, null);
             }
         }
     }
 
-    public void sign(PDDocument document, Path signatureKeyPath, char[] pw) throws Exception {
-        SignatureTool createSignature = new SignatureTool();
 
-        try (InputStream is = Files.newInputStream(signatureKeyPath)) {
-            String alias = createSignature.addKey(is, pw);
-            createSignature.addSignature(document, alias, pw);
+    protected void saveDocument(PDDocument document, String ownerPwd, String userPwd,
+                                AccessPermission ap, int encryptionKeyLength,
+                                Path file,
+                                SignatureTool createSignature, String keyAlias, char[] signatureKeyPwd) throws Exception {
+
+        try {
+            final boolean doSign = createSignature != null;
+
+            if ((!ownerPwd.isEmpty()) || (!userPwd.isEmpty())) {
+                StandardProtectionPolicy spp = new StandardProtectionPolicy(ownerPwd, userPwd, ap);
+                spp.setEncryptionKeyLength(encryptionKeyLength);
+                document.protect(spp);
+
+                if (doSign) {
+                    // For some reason the encryption breaks if we sign fresh protected document.
+                    // If we reload it (in protected state) it works.
+                    ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
+                    document.save(os, CompressParameters.NO_COMPRESSION);
+                    document.close();
+                    document = Loader.loadPDF(os.toByteArray(), ownerPwd.isEmpty() ? userPwd : ownerPwd);
+                }
+            }
+
+            try (OutputStream os = new BufferedOutputStream(Files.newOutputStream(file))) {
+                if (doSign) {
+                    createSignature.addSignature(document, keyAlias, signatureKeyPwd);
+                    document.saveIncremental(os);
+                } else {
+                    document.save(os);
+                }
+            }
+        } finally {
+            if (document != null)
+                document.close();
         }
     }
 
+
     public void close() {
-        if ( documentProxy != null) {
+        if (documentProxy != null) {
             documentProxy.close();
         }
     }

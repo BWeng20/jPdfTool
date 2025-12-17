@@ -33,6 +33,9 @@ public class Main implements Callable<Integer> {
     @Option(names = {"-out", "--out"}, required = true, description = "The path to the output file.")
     private String out;
 
+    @Option(names = {"-s", "--split"}, paramLabel = "<pages per file>", required = false, description = "Split resulting document. Output filename is extended by an index for each file.")
+    private int splitToPagesPerFile = 0;
+
     @Option(names = {"-opw", "--ownerpassword"}, paramLabel = "<password>", description = "Owner password for the output PDF.")
     private String ownerpassword = "";
 
@@ -170,8 +173,15 @@ public class Main implements Callable<Integer> {
                 System.out.println("Generated owner password: " + ownerpassword);
             }
 
-            executer.save(ownerpassword, userpassword, ap, encryptionKeyLength, outfile,
-                    signaturefile, signaturePassword);
+            if (this.splitToPagesPerFile > 0) {
+                executer.split(this.splitToPagesPerFile,
+                        ownerpassword, userpassword, ap, encryptionKeyLength, outfile,
+                        signaturefile, signaturePassword);
+
+            } else {
+                executer.save(ownerpassword, userpassword, ap, encryptionKeyLength, outfile,
+                        signaturefile, signaturePassword);
+            }
 
 
         } catch (Exception e) {
