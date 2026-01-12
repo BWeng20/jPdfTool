@@ -116,6 +116,7 @@ public class DocumentProxy {
         synchronized (renderedPages) {
             renderedPages.add(page);
             if (!notificationTriggered) {
+                notificationTriggered = true;
                 SwingUtilities.invokeLater(() -> {
                     List<Page> pages;
                     synchronized (renderedPages) {
@@ -130,7 +131,7 @@ public class DocumentProxy {
                     Log.debug("%d pages finished", pages.size());
                     for (Page p : pages) {
                         for (var pc : l) {
-                            pc.pageRendered(page);
+                            pc.pageRendered(p);
                         }
                     }
                 });
@@ -319,8 +320,8 @@ public class DocumentProxy {
         for (Page p : pagesToFire) {
             if (p.image == null) {
                 imageMissing = true;
-            } else
-                firePageRendered(p);
+                break;
+            }
         }
         if (imageMissing) {
             renderQueue.addDocument(this);
