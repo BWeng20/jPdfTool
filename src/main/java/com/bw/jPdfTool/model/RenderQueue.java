@@ -89,7 +89,7 @@ public class RenderQueue {
                                         Log.debug("Render page #%d", i);
                                         try {
                                             page.image = renderer.renderImageWithDPI(i, dpi);
-                                            if ( page.image == null) {
+                                            if (page.image == null) {
                                                 page.error = "Page not rendered (unknown error)";
 
                                             }
@@ -109,7 +109,7 @@ public class RenderQueue {
                     }
                 } catch (Exception e) {
                     Log.error("Render document failed: %s", e.getMessage());
-                    if ( Log.DEBUG ) {
+                    if (Log.DEBUG) {
                         e.printStackTrace();
                     }
                 }

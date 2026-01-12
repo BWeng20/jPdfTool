@@ -2,17 +2,16 @@
 
 Apache PDFBox based tool to modify PDFs without paying any money.
 
-This project began when I needed to protect a scanned PDF for an email, but the HP Scanner software couldn’t handle it.<br>
-My old Brother scanner had this feature - plus other useful tools - and (by the way) worked without requiring any registration.<br>
-Rather than paying for Adobe or other commercial solutions, I turned to the PDFBox documentation. <br>
+This project began when I needed to protect a scanned PDF for an email, but the HP Scanner software couldn’t handle it. My old Brother scanner had this feature - plus other useful tools - and (by the way) worked without requiring any registration. +
+Rather than paying for Adobe or other commercial solutions, I turned to the PDFBox documentation.  +
 I had used PDFBox in previous commercial projects, though I’d never dealt with PDF protection before.
 
-Thirty minutes later, the first version was up and running, and I sent the email.<br>
+Thirty minutes later, the first version was up and running, and I sent the email. +
 The following days were spent adding fancy features to the UI and the build system - just for fun.
 
 == Current Features
 
-image:doc/Screenshot Release2.0.png[Screenshot]
+image:doc/Screenshot Release2.1.png[Screenshot]
 
 === Load a PDF
 
@@ -24,8 +23,9 @@ Add additional PDFs and either mix pages or append them sequentially.
 
 === Set Owner and User Passwords
 
-You can set either an owner or a user password if specific permissions aren't required.<br>
-Both options provide basic encryption and restrict viewing access.<p>
+You can simply set a user password to restrict who can view the document. +
+Or you can set an owner password and control specific permissions. +
+Or you can do both.
 
 === Enable/Disable Compression
 
@@ -33,7 +33,7 @@ Toggle compression to optimize file size.
 
 === Set Permissions
 
-Permissions only take effect when a owner password is set.<br>
+Permissions only take effect when an owner password is set. +
 The UI automatically disables permission checkboxes unless the password is provided.
 
 === Remove &amp; Rearrange Pages
@@ -51,14 +51,18 @@ For you convenience the document is shown using PDFBox’s rendering engine
 
 === Export Embedded Images
 
-Display and export embedded images.<br>
+Display and export embedded images. +
 Some PDF tools seems to split images into fragments - this tool can provide a merged version for you.
+
+=== Convert Page to a single Image
+
+This effectively removes any hidden objects if you e.g. tried to redact documents but hidden text- or image-objects are still in the document. +
 
 === Load Protected PDFs
 
-Allows you to remove or change existing passwords.<br>
+Allows you to remove or change existing passwords. +
 If the current entered owner password does not match the original password of the loaded PDF, the UI will prompt you to
-enter the correct one.<br>
+enter the correct one. +
 This password input is masked and will not be shown in the UI afterward.
 
 === Store the File
@@ -71,12 +75,12 @@ Export the PDF into separate documents.
 
 === Switch "Look-And-Feels"
 
-Toggle between FlatLaf Dark/Light themes or system defaults.<br>
+Toggle between FlatLaf Dark/Light themes or system defaults. +
 The setting is stored in user-preferences.
 
 === Sign the File with a Certificate
 
-Sign the file using a certificate.<br>
+Sign the file using a certificate. +
 A `.p12` file with an X.509 certificate is required.
 
 == TODOs
@@ -102,14 +106,16 @@ This command simply adds all JARs in the lib folder to the classpath.
 The main class is `com.bw.jPdfTool.Main`.
 Calling it without any arguments will launch the *Graphical User Interface (GUI)*.
 
-==️ Command Line Interface (CLI)
+== Command Line Interface (CLI)
 
 In case you need to call the tool from a *CI/CD Pipeline* or script,
-you can use the CLI.<br> I assume you have a basic understanding of command-line operations.
+you can use the CLI. +
+I assume you have a basic understanding of command-line operations.
 
 *Prerequisites:*
-+ The current directrory of your shell (e.g. Bash) is in the distribution root directory.
-+ You have a *Java Runtime Environment (JRE)* installed - _see below for *headless* environments_.
+
+* The current directory of your shell (e.g. Bash) is in the distribution root directory.
+* You have a *Java Runtime Environment (JRE)* installed - _see below for *headless* environments_.
 
 To show the usage information of the CLI, use:
 
@@ -118,7 +124,7 @@ To show the usage information of the CLI, use:
 java -cp "$(printf %s: lib/*.jar)" com.bw.jPdfTool.Main -h
 ----
 
-*Note:* The CLI currently supports only a subset of the tool's total functionality.<br>
+*Note:* The CLI currently supports only a subset of the tool's total functionality. +
 Feel free to ask in case you need special functionality.
 
 === Headless Environment Considerations

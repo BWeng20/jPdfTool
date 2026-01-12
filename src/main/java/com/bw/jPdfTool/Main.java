@@ -34,7 +34,7 @@ public class Main implements Callable<Integer> {
     @Option(names = {"-out", "--out"}, required = true, description = "The path to the output file.")
     private String out;
 
-    @Option(names = {"-s", "--split"}, paramLabel = "<pages per file>", required = false, description = "Split resulting document. Output filename is extended by an index for each file.")
+    @Option(names = {"-s", "--split"}, paramLabel = "<pages per file>", description = "Split resulting document. Output filename is extended by an index for each file.")
     private int splitToPagesPerFile = 0;
 
     @Option(names = {"-opw", "--ownerpassword"}, paramLabel = "<password>", description = "Owner password for the output PDF.")
@@ -49,17 +49,17 @@ public class Main implements Callable<Integer> {
     @Parameters(paramLabel = "PDF File", description = "File(s) to load.")
     private List<String> fileArguments;
 
-    @Option(names = {"-cpt", "--canPrint"}, negatable = true, defaultValue = "true", description = "User shall be able to print.")
-    private boolean canPrint = true;
+    @Option(names = {"-cpt", "--canPrint"}, negatable = true, defaultValue = "false", description = "User shall be able to print.")
+    private boolean canPrint = false;
 
     @Option(names = {"-cmd", "--canModify"}, negatable = true, defaultValue = "false", description = "User shall be able to modify the document.")
     private boolean canModify = false;
 
-    @Option(names = {"-cec", "--canExtractContent"}, negatable = true, defaultValue = "true", description = "User shall be able to extract content.")
-    private boolean canExtractContent = true;
+    @Option(names = {"-cec", "--canExtractContent"}, negatable = true, defaultValue = "false", description = "User shall be able to extract content.")
+    private boolean canExtractContent = false;
 
-    @Option(names = {"-cea", "--canExtractForAccessibility"}, negatable = true, defaultValue = "true", description = "User shall be able to extract content for accessibility.")
-    private boolean canExtractForAccessibility = true;
+    @Option(names = {"-cea", "--canExtractForAccessibility"}, negatable = true, defaultValue = "false", description = "User shall be able to extract content for accessibility.")
+    private boolean canExtractForAccessibility = false;
 
     @Option(names = {"-cff", "--canFillInForm"}, negatable = true, defaultValue = "false", description = "User shall be able to fill in forms.")
     private boolean canFillInForm = false;

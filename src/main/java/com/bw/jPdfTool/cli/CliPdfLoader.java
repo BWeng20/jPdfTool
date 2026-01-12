@@ -23,6 +23,7 @@ public class CliPdfLoader implements PdfLoadWorker {
     protected final MergeOptions mo;
     protected Consumer<PDDocument> consumer;
     private final String ownerPassword;
+    private boolean finished = false;
 
     public CliPdfLoader(DocumentProxy proxy, Path file, MergeOptions mo, String ownerPassword) {
         this.documentProxy = proxy;
@@ -47,6 +48,7 @@ public class CliPdfLoader implements PdfLoadWorker {
         } catch (Exception e) {
             documentProxy.error = e.getMessage();
         }
+        this.finished = true;
 
         try {
             if (!documentProxy.isClosed()) {
@@ -66,5 +68,10 @@ public class CliPdfLoader implements PdfLoadWorker {
     @Override
     public void cancel() {
         // Not asynchronous, nothing to stop.
+    }
+
+    @Override
+    public boolean isFinished() {
+        return finished;
     }
 }

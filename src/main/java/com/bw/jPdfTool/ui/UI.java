@@ -129,6 +129,7 @@ public class UI extends JSplitPane {
     /// //////////////////////////////////////////
 
     private final JButton deleteButton = new JButton(getIcon("delete"));
+    private final JButton renderToImageButton = new JButton("To Image");
     private final JButton rotateClockwiseButton = new JButton(getIcon("rotateClockwise"));
     private final JButton moveLeft = new JButton(getIcon("moveLeft"));
     private final JButton moveRight = new JButton(getIcon("moveRight"));
@@ -748,6 +749,10 @@ public class UI extends JSplitPane {
         deleteButton.setToolTipText("Deletes the current page.");
         deleteButton.addActionListener(e -> doDeletePage());
 
+        renderToImageButton.setOpaque(false);
+        renderToImageButton.setToolTipText("Replace the page with the rendered image.");
+        renderToImageButton.addActionListener(e -> doRenderToImage());
+
         rotateClockwiseButton.setOpaque(false);
         rotateClockwiseButton.setToolTipText("Rotates the current page clockwise.");
         rotateClockwiseButton.addActionListener(e -> doRotateClockwise());
@@ -795,6 +800,10 @@ public class UI extends JSplitPane {
         gc.gridy = 0;
         gc.fill = GridBagConstraints.NONE;
         pageManipulation.add(deleteButton, gc);
+        gc.gridx = 3;
+        pageManipulation.add(renderToImageButton, gc);
+
+        gc.gridx = 2;
         gc.gridy++;
         pageManipulation.add(rotateClockwiseButton, gc);
         gc.gridy++;
@@ -802,11 +811,13 @@ public class UI extends JSplitPane {
         gc.gridx++;
         pageManipulation.add(moveRight, gc);
 
+        gc.gridx = 4;
         gc.gridy = 0;
         gc.gridheight = 2;
         gc.anchor = GridBagConstraints.NORTH;
         pageManipulation.add(exportImages, gc);
 
+        gc.gridx = 3;
         gc.gridy++;
         gc.weightx = 0.1;
         gc.gridheight = 1;
@@ -1131,6 +1142,17 @@ public class UI extends JSplitPane {
     }
 
     /**
+     * Renders a page as image .
+     */
+    protected void doRenderToImage() {
+        PageWidget pw = pages.getSelectedPage();
+        if (pw != null) {
+            Page page = pw.getPage();
+            page.document.renderPageToImage(page.pageNb);
+        }
+    }
+
+    /**
      * Requests a file template and creates multiple documents.
      */
     protected void doSplit() {
@@ -1230,18 +1252,20 @@ public class UI extends JSplitPane {
      * This is done parallel to the UI that shows the known pages.
      */
     protected synchronized void startNextLoader() {
-        if (currentLoader == null) {
-            currentLoader = loadWorker.pollFirst();
+        if (currentLoader == null || currentLoader.isFinished()) {
+            do {
+                currentLoader = loadWorker.pollFirst();
+            } while (currentLoader != null && currentLoader.isFinished());
             if (currentLoader != null)
                 currentLoader.execute();
-            else if (documentProxy.getDocument() != null) {
-                int pageCount = documentProxy.getDocument().getNumberOfPages();
-                while (documentProxy.pages.size() < pageCount) {
-                    Page page = new Page(documentProxy, documentProxy.pages.size() + 1, pageCount);
-                    documentProxy.pages.add(page);
-                }
-                renderQueue.addDocument(documentProxy);
+        }
+        if (currentLoader != null && documentProxy.getDocument() != null) {
+            int pageCount = documentProxy.getDocument().getNumberOfPages();
+            while (documentProxy.pages.size() < pageCount) {
+                Page page = new Page(documentProxy, documentProxy.pages.size() + 1, pageCount);
+                documentProxy.pages.add(page);
             }
+            renderQueue.addDocument(documentProxy);
         }
     }
 
@@ -1437,6 +1461,7 @@ public class UI extends JSplitPane {
         selectedPage = page;
         boolean enabled = page != null;
         deleteButton.setEnabled(enabled);
+        renderToImageButton.setEnabled(enabled);
         rotateClockwiseButton.setEnabled(enabled);
         moveLeft.setEnabled(enabled);
         moveRight.setEnabled(enabled);

@@ -26,6 +26,7 @@ public class UIPdfLoadWorker extends SwingWorker<PDDocument, Void> implements Pd
     protected Consumer<PDDocument> consumer;
     private final JPasswordField passwordField = new JPasswordField();
     private final String ownerPassword;
+    private boolean finished = false;
 
     public UIPdfLoadWorker(DocumentProxy documentProxy, Path file,
                            String ownerPassword,
@@ -86,6 +87,7 @@ public class UIPdfLoadWorker extends SwingWorker<PDDocument, Void> implements Pd
     @Override
     protected void done() {
         try {
+            finished = true;
             PDDocument document = get();
             if (!documentProxy.isClosed()) {
                 if (passwordNeeded) {
@@ -109,6 +111,12 @@ public class UIPdfLoadWorker extends SwingWorker<PDDocument, Void> implements Pd
 
     @Override
     public void cancel() {
+        this.finished = true;
         this.cancel(true);
+    }
+
+    @Override
+    public boolean isFinished() {
+        return finished;
     }
 }

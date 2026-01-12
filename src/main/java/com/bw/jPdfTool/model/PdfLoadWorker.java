@@ -6,4 +6,6 @@ public interface PdfLoadWorker {
 
     void cancel();
 
+    boolean isFinished();
+
 }

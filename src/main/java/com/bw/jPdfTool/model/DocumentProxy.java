@@ -7,9 +7,15 @@ import org.apache.pdfbox.multipdf.PDFMergerUtility;
 import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.PDPageTree;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.rendering.PDFRenderer;
 
 import javax.swing.SwingUtilities;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayDeque;
@@ -45,18 +51,21 @@ public class DocumentProxy {
      * This is done parallel to the UI that shows the known pages.
      */
     public synchronized void startNextLoader() {
-        if (currentLoader == null) {
-            currentLoader = loadWorker.pollFirst();
-            if (currentLoader != null)
+        if (currentLoader == null || currentLoader.isFinished()) {
+            do {
+                currentLoader = loadWorker.pollFirst();
+            } while (currentLoader != null && currentLoader.isFinished());
+            if (currentLoader != null) {
                 currentLoader.execute();
-            else if (DocumentProxy.this.document != null) {
-                int pageCount = DocumentProxy.this.document.getNumberOfPages();
-                while (pages.size() < pageCount) {
-                    Page page = new Page(DocumentProxy.this, pages.size() + 1, pageCount);
-                    pages.add(page);
-                }
-                renderQueue.addDocument(this);
             }
+        }
+        if (currentLoader == null && DocumentProxy.this.document != null) {
+            int pageCount = DocumentProxy.this.document.getNumberOfPages();
+            while (pages.size() < pageCount) {
+                Page page = new Page(DocumentProxy.this, pages.size() + 1, pageCount);
+                pages.add(page);
+            }
+            renderQueue.addDocument(this);
         }
     }
 
@@ -209,7 +218,8 @@ public class DocumentProxy {
         if (currentLoader != null) {
             var cl = currentLoader;
             currentLoader = null;
-            cl.cancel();
+            if (!cl.isFinished())
+                cl.cancel();
         }
     }
 
@@ -290,7 +300,38 @@ public class DocumentProxy {
         }
     }
 
+    public void renderPageToImage(int pageNb) {
+        ensuredDocument();
+        if (document.getNumberOfPages() >= pageNb) {
+
+            PDFRenderer pdfRenderer = new PDFRenderer(document);
+            int pageIndex = pageNb - 1;
+
+            try {
+                BufferedImage bim = pdfRenderer.renderImageWithDPI(pageIndex, 300);
+
+                PDPage oldPage = document.getPage(pageIndex);
+                PDRectangle mediaBox = oldPage.getMediaBox();
+                PDPage newPage = new PDPage(mediaBox);
+
+                PDImageXObject pdImage = LosslessFactory.createFromImage(document, bim);
+
+                try (PDPageContentStream contentStream = new PDPageContentStream(document, newPage)) {
+                    contentStream.drawImage(pdImage, 0, 0, mediaBox.getWidth(), mediaBox.getHeight());
+                }
+
+                document.removePage(pageIndex);
+                document.getPages().insertBefore(newPage, document.getPage(pageIndex));
+                pages.get(pageIndex).image = null;
+                refirePages();
+            } catch (Exception e) {
+
+            }
+        }
+    }
+
     public void deletePage(int pageNb) {
+
         ensuredDocument();
 
         if (document.getNumberOfPages() >= pageNb) {
@@ -370,7 +411,6 @@ public class DocumentProxy {
     public synchronized void loaderFinished(PdfLoadWorker loadWorker, PDDocument document, MergeOptions mo) {
         boolean fireLoaded = false;
         int oldPageCount = -1;
-        currentLoader = null;
         if (!isClosed()) {
             {
                 if (document != null) {
