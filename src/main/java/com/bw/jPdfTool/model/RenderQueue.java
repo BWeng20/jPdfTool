@@ -59,47 +59,59 @@ public class RenderQueue {
                 DocumentProxy proxy;
 
                 try {
-                    proxy = documentQueue.take();
-                } catch (InterruptedException ignored) {
-                    continue;
-                }
-                if (proxy.isClosed())
-                    continue;
-                PDDocument document = proxy.getDocument();
-                if (document != null) {
-                    Log.debug("Render document started");
-                    PDFRenderer renderer = new PDFRenderer(document);
 
-                    RenderingHints renderingHints = new RenderingHints(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                    renderingHints.put(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-                    renderingHints.put(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-                    renderer.setRenderingHints(renderingHints);
+                    try {
+                        proxy = documentQueue.take();
+                    } catch (InterruptedException ignored) {
+                        continue;
+                    }
+                    if (proxy.isClosed())
+                        continue;
+                    PDDocument document = proxy.getDocument();
+                    if (document != null) {
+                        Log.debug("Render document started");
+                        PDFRenderer renderer = new PDFRenderer(document);
 
-                    // CHeck in loop for cases where the document was manipulated meanwhile.
-                    while (proxy.needsRendering()) {
-                        int pdPageCount = document.getNumberOfPages();
-                        for (int i = 0; i < proxy.getPageCount(); i++) {
-                            if (proxy.isClosed())
-                                break;
-                            Page page = proxy.getPage(i + 1);
-                            if (page != null && page.image == null && page.error == null) {
-                                if (pdPageCount > i) {
-                                    Log.debug("Render page #%d", i);
-                                    try {
-                                        page.image = renderer.renderImageWithDPI(i, dpi);
-                                        page.dpi = dpi;
-                                        page.error = null;
-                                    } catch (Exception e) {
-                                        page.error = e.getMessage();
+                        RenderingHints renderingHints = new RenderingHints(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                        renderingHints.put(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                        renderingHints.put(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+                        renderer.setRenderingHints(renderingHints);
+
+                        // Check in loop for cases where the document was manipulated meanwhile.
+                        while (proxy.needsRendering()) {
+                            int pdPageCount = document.getNumberOfPages();
+                            for (int i = 0; i < proxy.getPageCount(); i++) {
+                                if (proxy.isClosed())
+                                    break;
+                                Page page = proxy.getPage(i + 1);
+                                if (page != null && page.image == null && page.error == null) {
+                                    if (pdPageCount > i) {
+                                        Log.debug("Render page #%d", i);
+                                        try {
+                                            page.image = renderer.renderImageWithDPI(i, dpi);
+                                            if ( page.image == null) {
+                                                page.error = "Page not rendered (unknown error)";
+
+                                            }
+                                            page.dpi = dpi;
+                                            page.error = null;
+                                        } catch (Exception e) {
+                                            page.error = e.getMessage();
+                                        }
+                                    } else {
+                                        page.error = "Page Index of range (internal error)";
                                     }
-                                } else {
-                                    page.error = "Page Index of range (internal error)";
+                                    pageRendered(page);
                                 }
-                                pageRendered(page);
                             }
                         }
+                        Log.debug("Render document finished");
                     }
-                    Log.debug("Render document finished");
+                } catch (Exception e) {
+                    Log.error("Render document failed: %s", e.getMessage());
+                    if ( Log.DEBUG ) {
+                        e.printStackTrace();
+                    }
                 }
             }
         }
