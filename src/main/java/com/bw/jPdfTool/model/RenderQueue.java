@@ -25,7 +25,7 @@ public class RenderQueue {
     public void start() {
         if (!running) {
             var prefs = Preferences.getInstance();
-            dpi = prefs.getInt(Preferences.USER_PREF_DPI, dpi);
+            dpi = prefs.getDpi();
             prefs.addPropertyChangeListener(propertyChangeListener, Preferences.USER_PREF_DPI);
             running = true;
             PdfRenderWorker worker = new PdfRenderWorker();
@@ -36,7 +36,7 @@ public class RenderQueue {
     }
 
     private final PropertyChangeListener propertyChangeListener =
-            evt -> dpi = Preferences.getInstance().getInt(Preferences.USER_PREF_DPI, dpi);
+            evt -> dpi = Preferences.getInstance().getDpi();
 
     public void stop() {
         Preferences.getInstance().removePropertyChangeListener(propertyChangeListener, Preferences.USER_PREF_DPI);

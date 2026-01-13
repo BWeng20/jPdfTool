@@ -114,6 +114,20 @@ public class Preferences {
         return prefs.getInt(key, defaultValue);
     }
 
+    /**
+     * Get setting {@value USER_PREF_DPI} with sanity check to ensure range [150 - 1200].
+     *
+     * @return the dpi setting.
+     */
+    public int getDpi() {
+        int dpiSetting = this.getInt(Preferences.USER_PREF_DPI, 300);
+        if (dpiSetting < 150)
+            dpiSetting = 150;
+        else if (dpiSetting > 1200)
+            dpiSetting = 1200;
+        return dpiSetting;
+    }
+
     public String getString(String key, String defaultValue) {
         return prefs.get(key, defaultValue);
     }

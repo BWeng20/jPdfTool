@@ -962,7 +962,7 @@ public class UI extends JSplitPane {
 
             ButtonGroup dpiGroup = new ButtonGroup();
 
-            int dpiSetting = Preferences.getInstance().getInt(Preferences.USER_PREF_DPI, 300);
+            int dpiSetting = Preferences.getInstance().getDpi();
 
             for (int dpi : dpis) {
                 JRadioButtonMenuItem dpiItem = new JRadioButtonMenuItem(String.format("%d dpi", dpi));
@@ -1149,6 +1149,8 @@ public class UI extends JSplitPane {
         if (pw != null) {
             Page page = pw.getPage();
             page.document.renderPageToImage(page.pageNb);
+            toaster.toast(ToastType.SUCCESS, 5000, "<html>Converted to %d dpi image</html>",
+                    Preferences.getInstance().getDpi());
         }
     }
 
