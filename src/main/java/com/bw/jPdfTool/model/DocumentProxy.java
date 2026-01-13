@@ -1,6 +1,7 @@
 package com.bw.jPdfTool.model;
 
 import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.Preferences;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
@@ -308,21 +309,32 @@ public class DocumentProxy {
             int pageIndex = pageNb - 1;
 
             try {
-                BufferedImage bim = pdfRenderer.renderImageWithDPI(pageIndex, 300);
 
-                PDPage oldPage = document.getPage(pageIndex);
+                final PDPage oldPage = document.getPage(pageIndex);
+
+                int rotation = oldPage.getRotation();
+                oldPage.setRotation(0);
+
                 PDRectangle mediaBox = oldPage.getMediaBox();
                 PDPage newPage = new PDPage(mediaBox);
 
+                int dpi = Preferences.getInstance().getDpi();
+
+                BufferedImage bim = pdfRenderer.renderImageWithDPI(pageIndex, dpi);
                 PDImageXObject pdImage = LosslessFactory.createFromImage(document, bim);
 
                 try (PDPageContentStream contentStream = new PDPageContentStream(document, newPage)) {
                     contentStream.drawImage(pdImage, 0, 0, mediaBox.getWidth(), mediaBox.getHeight());
                 }
+                newPage.setRotation(rotation);
 
-                document.removePage(pageIndex);
-                document.getPages().insertBefore(newPage, document.getPage(pageIndex));
+                var pageTree = document.getPages();
+                pageTree.insertAfter(newPage, oldPage);
+                pageTree.remove(oldPage);
+
+                // should visibly the same, but to ensure WYSIWYG, force to re-render the page
                 pages.get(pageIndex).image = null;
+
                 refirePages();
             } catch (Exception e) {
 
