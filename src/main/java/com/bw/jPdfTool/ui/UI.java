@@ -37,6 +37,7 @@ import java.awt.dnd.DropTargetAdapter;
 import java.awt.dnd.DropTargetDropEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.KeyAdapter;
 import java.awt.event.MouseAdapter;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
@@ -130,7 +131,9 @@ public class UI extends JSplitPane {
 
     private final JButton deleteButton = new JButton(getIcon("delete"));
     private final JButton renderToImageButton = new JButton("To Image");
+    private final JButton renderAllToImageButton = new JButton("All to Images");
     private final JButton rotateClockwiseButton = new JButton(getIcon("rotateClockwise"));
+    private final JButton rotateAllClockwiseButton = new JButton(getIcon("rotateAllClockwise"));
     private final JButton moveLeft = new JButton(getIcon("moveLeft"));
     private final JButton moveRight = new JButton(getIcon("moveRight"));
     private final JButton exportImages = new JButton("<html>Export<br>Images</html>");
@@ -175,7 +178,7 @@ public class UI extends JSplitPane {
                 }
             }
         } catch (Exception ex) {
-            ex.printStackTrace(System.err);
+            Log.exception(ex);
         }
 
     }
@@ -266,12 +269,12 @@ public class UI extends JSplitPane {
         panel.add(Box.createGlue(), gcLabel);
 
         browseButton.addActionListener(e -> doBrowsePdf());
-        browseAppendButton.addActionListener(e -> {
+        browseAppendButton.addActionListener(e -> runInBusy(() -> {
             if (documentProxy == null)
                 doBrowsePdf();
             else
                 doBrowseAdditionalPdf();
-        });
+        }));
 
         saveButton.addActionListener(e -> doSave());
         splitDocument.addActionListener(e -> doSplit());
@@ -753,9 +756,20 @@ public class UI extends JSplitPane {
         renderToImageButton.setToolTipText("Replace the page with the rendered image.");
         renderToImageButton.addActionListener(e -> doRenderToImage());
 
+        renderAllToImageButton.setEnabled(false);
+        renderAllToImageButton.setOpaque(false);
+        renderAllToImageButton.setToolTipText("Replace all pages with the rendered images.");
+        renderAllToImageButton.addActionListener(e ->
+                runInBusy(this::doRenderAllToImage));
+
         rotateClockwiseButton.setOpaque(false);
         rotateClockwiseButton.setToolTipText("Rotates the current page clockwise.");
         rotateClockwiseButton.addActionListener(e -> doRotateClockwise());
+
+        rotateAllClockwiseButton.setEnabled(false);
+        rotateAllClockwiseButton.setOpaque(false);
+        rotateAllClockwiseButton.setToolTipText("Rotates all pages clockwise.");
+        rotateAllClockwiseButton.addActionListener(e -> runInBusy(this::doRotateAllClockwise));
 
         moveLeft.setOpaque(false);
         moveLeft.setToolTipText("Moves the current page up.");
@@ -795,18 +809,30 @@ public class UI extends JSplitPane {
         gc.gridwidth = 2;
         pageManipulation.add(quality, gc);
 
-        gc.gridwidth = 1;
+        gc.gridwidth = 2;
         gc.gridx = 2;
         gc.gridy = 0;
         gc.fill = GridBagConstraints.NONE;
-        pageManipulation.add(deleteButton, gc);
-        gc.gridx = 3;
-        pageManipulation.add(renderToImageButton, gc);
 
+        JPanel toImageButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        toImageButtons.setOpaque(false);
+        toImageButtons.add(renderToImageButton);
+        toImageButtons.add(Box.createHorizontalStrut(5));
+        toImageButtons.add(renderAllToImageButton);
+
+        pageManipulation.add(toImageButtons, gc);
+
+        gc.gridwidth = 1;
+        gc.gridy++;
         gc.gridx = 2;
-        gc.gridy++;
         pageManipulation.add(rotateClockwiseButton, gc);
+        gc.gridx++;
+        pageManipulation.add(rotateAllClockwiseButton, gc);
+
         gc.gridy++;
+        gc.gridx = 4;
+        pageManipulation.add(deleteButton, gc);
+        gc.gridx = 2;
         pageManipulation.add(moveLeft, gc);
         gc.gridx++;
         pageManipulation.add(moveRight, gc);
@@ -887,7 +913,7 @@ public class UI extends JSplitPane {
             }
         } catch (Exception e) {
             System.err.println("Failed to switch LAF to " + laf);
-            e.printStackTrace(System.err);
+            Log.exception(e);
         }
     }
 
@@ -1131,6 +1157,14 @@ public class UI extends JSplitPane {
     }
 
     /**
+     * Rotates all pages.
+     */
+    protected void doRotateAllClockwise() {
+        if (documentProxy != null)
+            documentProxy.rotatePages(90);
+    }
+
+    /**
      * Deletes the selected page.
      */
     protected void doDeletePage() {
@@ -1142,7 +1176,7 @@ public class UI extends JSplitPane {
     }
 
     /**
-     * Renders a page as image .
+     * Renders a page as image.
      */
     protected void doRenderToImage() {
         PageWidget pw = pages.getSelectedPage();
@@ -1150,6 +1184,17 @@ public class UI extends JSplitPane {
             Page page = pw.getPage();
             page.document.renderPageToImage(page.pageNb);
             toaster.toast(ToastType.SUCCESS, 5000, "<html>Converted to %d dpi image</html>",
+                    Preferences.getInstance().getDpi());
+        }
+    }
+
+    /**
+     * Renders all pages as images.
+     */
+    protected void doRenderAllToImage() {
+        if (documentProxy != null) {
+            documentProxy.renderAllPagesToImage();
+            toaster.toast(ToastType.SUCCESS, 5000, "<html>Converted all pages to %d dpi images</html>",
                     Preferences.getInstance().getDpi());
         }
     }
@@ -1347,7 +1392,7 @@ public class UI extends JSplitPane {
 
                 }
             } catch (Exception ex) {
-                ex.printStackTrace();
+                Log.exception(ex);
                 toaster.toast(ToastType.ERROR, 20000, "<html><font size='+2'>Error</font><br><font size='+1'><i>%s</i></font></html>", ex.getMessage());
                 // JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             }
@@ -1417,7 +1462,7 @@ public class UI extends JSplitPane {
             pref.set(Preferences.USER_PREF_SIG_PASSWORD, new String(pw));
             return true;
         } catch (Exception ex) {
-            ex.printStackTrace();
+            Log.exception(ex);
             toaster.toast(ToastType.ERROR, 20000,
                     "<html><font size='+2'>Error</font><br><font size='+1'><i>%s</i></font></html>", ex.getMessage());
             return false;
@@ -1518,23 +1563,46 @@ public class UI extends JSplitPane {
     }
 
     private boolean busy;
-    private JPanel glassPane;
+
+    private final MouseAdapter busyMouseAdapter = new MouseAdapter() {
+    };
+
+    private final KeyAdapter busyKeyAdapter = new KeyAdapter() {
+    };
 
     public void setBusy(boolean busy) {
         if (this.busy != busy) {
+            Log.info("setBusy(%s)", busy);
             this.busy = busy;
             UI.mainWindow.setCursor(Cursor.getPredefinedCursor(busy ? Cursor.WAIT_CURSOR : Cursor.DEFAULT_CURSOR));
-            if (glassPane == null) {
-                glassPane = new JPanel();
-                glassPane.setOpaque(false);
-                glassPane.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
-                glassPane.addMouseListener(new MouseAdapter() {
-                }); // Block mouse events
-                UI.mainWindow.setGlassPane(glassPane);
-
-                glassPane.setVisible(busy);
+            Component glassPane = UI.mainWindow.getGlassPane();
+            glassPane.setVisible(busy);
+            if (busy) {
+                glassPane.addMouseListener(busyMouseAdapter);
+                glassPane.addKeyListener(busyKeyAdapter);
+                glassPane.requestFocusInWindow();
+            } else {
+                glassPane.removeMouseListener(busyMouseAdapter);
+                glassPane.removeKeyListener(busyKeyAdapter);
             }
         }
+    }
+
+    public void runInBusy(final Runnable r) {
+        setBusy(true);
+        new SwingWorker<>() {
+            @Override
+            protected Object doInBackground()  {
+                r.run();
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                setBusy(false);
+
+            }
+        }.execute();
     }
 
     /**
@@ -1562,6 +1630,8 @@ public class UI extends JSplitPane {
                     // This method is called each time some file wasloaded.
                     // "document" is always the main effective document.
 
+                    renderAllToImageButton.setEnabled(true);
+                    rotateAllClockwiseButton.setEnabled(true);
                     saveButton.setEnabled(true);
                     splitDocument.setEnabled(true);
                     browseAppendButton.setEnabled(true);
@@ -1596,6 +1666,8 @@ public class UI extends JSplitPane {
         } else {
             initDocumentInformation();
 
+            renderAllToImageButton.setEnabled(false);
+            rotateAllClockwiseButton.setEnabled(false);
             saveButton.setEnabled(false);
             splitDocument.setEnabled(false);
             browseAppendButton.setEnabled(false);

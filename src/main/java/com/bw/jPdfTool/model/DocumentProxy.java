@@ -301,6 +301,47 @@ public class DocumentProxy {
         }
     }
 
+    public void rotatePages(int degree) {
+        ensuredDocument();
+
+        for (int pageIndex = 0; pageIndex < document.getNumberOfPages(); ++pageIndex) {
+            Page p = pages.get(pageIndex);
+            p.image = null;
+            p.scale = 0;
+            PDPage pd = document.getPage(pageIndex);
+            pd.setRotation(pd.getRotation() + degree);
+        }
+        refirePages();
+    }
+
+    private void renderPageToImage(PDFRenderer pdfRenderer, final int pageIndex) throws IOException {
+
+        final PDPage oldPage = document.getPage(pageIndex);
+
+        int rotation = oldPage.getRotation();
+        oldPage.setRotation(0);
+
+        PDRectangle mediaBox = oldPage.getMediaBox();
+        PDPage newPage = new PDPage(mediaBox);
+
+        int dpi = Preferences.getInstance().getDpi();
+
+        BufferedImage bim = pdfRenderer.renderImageWithDPI(pageIndex, dpi);
+        PDImageXObject pdImage = LosslessFactory.createFromImage(document, bim);
+
+        try (PDPageContentStream contentStream = new PDPageContentStream(document, newPage)) {
+            contentStream.drawImage(pdImage, 0, 0, mediaBox.getWidth(), mediaBox.getHeight());
+        }
+        newPage.setRotation(rotation);
+
+        var pageTree = document.getPages();
+        pageTree.insertAfter(newPage, oldPage);
+        pageTree.remove(oldPage);
+
+        // should visibly the same, but to ensure WYSIWYG, force to re-render the page
+        pages.get(pageIndex).image = null;
+    }
+
     public void renderPageToImage(int pageNb) {
         ensuredDocument();
         if (document.getNumberOfPages() >= pageNb) {
@@ -309,37 +350,26 @@ public class DocumentProxy {
             int pageIndex = pageNb - 1;
 
             try {
-
-                final PDPage oldPage = document.getPage(pageIndex);
-
-                int rotation = oldPage.getRotation();
-                oldPage.setRotation(0);
-
-                PDRectangle mediaBox = oldPage.getMediaBox();
-                PDPage newPage = new PDPage(mediaBox);
-
-                int dpi = Preferences.getInstance().getDpi();
-
-                BufferedImage bim = pdfRenderer.renderImageWithDPI(pageIndex, dpi);
-                PDImageXObject pdImage = LosslessFactory.createFromImage(document, bim);
-
-                try (PDPageContentStream contentStream = new PDPageContentStream(document, newPage)) {
-                    contentStream.drawImage(pdImage, 0, 0, mediaBox.getWidth(), mediaBox.getHeight());
-                }
-                newPage.setRotation(rotation);
-
-                var pageTree = document.getPages();
-                pageTree.insertAfter(newPage, oldPage);
-                pageTree.remove(oldPage);
-
-                // should visibly the same, but to ensure WYSIWYG, force to re-render the page
-                pages.get(pageIndex).image = null;
-
+                renderPageToImage(pdfRenderer, pageIndex);
                 refirePages();
             } catch (Exception e) {
-
+                Log.exception(e);
             }
         }
+    }
+
+    public void renderAllPagesToImage() {
+        ensuredDocument();
+        try {
+            PDFRenderer pdfRenderer = new PDFRenderer(document);
+            for (int pageIndex = 0; pageIndex < document.getNumberOfPages(); ++pageIndex) {
+                renderPageToImage(pdfRenderer, pageIndex);
+            }
+        } catch (Exception e) {
+            Log.exception(e);
+        }
+        refirePages();
+
     }
 
     public void deletePage(int pageNb) {
@@ -420,7 +450,7 @@ public class DocumentProxy {
         return false;
     }
 
-    public synchronized void loaderFinished(PdfLoadWorker loadWorker, PDDocument document, MergeOptions mo) {
+    public synchronized void loaderFinished(PDDocument document, MergeOptions mo) {
         boolean fireLoaded = false;
         int oldPageCount = -1;
         if (!isClosed()) {
