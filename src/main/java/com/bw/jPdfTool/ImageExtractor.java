@@ -60,7 +60,7 @@ public class ImageExtractor extends PageDrawer {
                 System.out.println("> " + i);
             return renderer.extractor.images;
         } catch (IOException e) {
-            e.printStackTrace();
+            Log.exception(e);
         }
         return Collections.emptyList();
     }

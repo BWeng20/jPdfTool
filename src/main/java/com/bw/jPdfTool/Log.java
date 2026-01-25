@@ -18,4 +18,11 @@ public final class Log {
     public static void error(String format, Object... arguments) {
         System.err.printf((format) + "%n", arguments);
     }
+
+    public static void exception(Exception e) {
+        System.err.printf("[EXCEPTION] %s", e.getMessage());
+        if (Log.DEBUG)
+            e.printStackTrace();
+
+    }
 }

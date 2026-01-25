@@ -228,7 +228,7 @@ public class Main implements Callable<Integer> {
 
 
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.exception(e);
             return 1;
         } finally {
             executer.close();

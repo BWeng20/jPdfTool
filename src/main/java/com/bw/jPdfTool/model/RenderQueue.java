@@ -109,9 +109,7 @@ public class RenderQueue {
                     }
                 } catch (Exception e) {
                     Log.error("Render document failed: %s", e.getMessage());
-                    if (Log.DEBUG) {
-                        e.printStackTrace();
-                    }
+                    Log.exception(e);
                 }
             }
         }
