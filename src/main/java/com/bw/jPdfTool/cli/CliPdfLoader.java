@@ -57,7 +57,7 @@ public class CliPdfLoader implements PdfLoadWorker {
                         consumer.accept(document);
                 }
                 Log.debug("DONE (%s)", file);
-                documentProxy.loaderFinished(this, document, mo);
+                documentProxy.loaderFinished( document, mo);
             }
         } catch (Exception e) {
             documentProxy.error = e.getMessage();

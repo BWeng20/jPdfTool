@@ -99,7 +99,7 @@ public class UIPdfLoadWorker extends SwingWorker<PDDocument, Void> implements Pd
 
                     }
                     Log.debug("DONE (%s)", file);
-                    documentProxy.loaderFinished(this, document, mo);
+                    documentProxy.loaderFinished( document, mo);
                 }
             }
         } catch (Exception e) {
