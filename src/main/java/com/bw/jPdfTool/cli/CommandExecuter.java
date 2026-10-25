@@ -1,6 +1,8 @@
 package com.bw.jPdfTool.cli;
 
 import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.Preferences;
+import com.bw.jPdfTool.Redactor;
 import com.bw.jPdfTool.SignatureTool;
 import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.model.MergeOptions;
@@ -21,6 +23,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * Tool to execute CLI commands.
@@ -55,6 +58,26 @@ public class CommandExecuter {
             CliPdfLoader lw = new CliPdfLoader(documentProxy, p, mo, password2Load);
             lw.execute();
         }
+    }
+
+    /**
+     * Permanently removes text and areas from the effective document.
+     *
+     * @param patterns Text patterns to redact.
+     * @param areas    Areas to redact.
+     * @return The number of redacted areas.
+     */
+    public int redact(List<Pattern> patterns, List<Redactor.Region> areas) throws Exception {
+        PDDocument document = documentProxy == null ? null : documentProxy.getDocument();
+        if (document == null)
+            return 0;
+        List<Redactor.Region> regions = new ArrayList<>(areas);
+        for (Pattern p : patterns) {
+            regions.addAll(Redactor.findText(document, p));
+        }
+        Preferences prefs = Preferences.getInstance();
+        Redactor.redact(document, regions, prefs.getDpi(), prefs.getRedactionColor());
+        return regions.size();
     }
 
     /**

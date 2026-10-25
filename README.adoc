@@ -58,6 +58,13 @@ Some PDF tools seems to split images into fragments - this tool can provide a me
 
 This effectively removes any hidden objects if you e.g. tried to redact documents but hidden text- or image-objects are still in the document. +
 
+=== Redact Text and Areas (CLI)
+
+Permanently removes text matching a regular expression (`--redactText`) or rectangular areas (`--redactArea`). +
+Affected pages are rendered to an image, the areas are painted black and the page is replaced by that image, so the redacted content (and any other text on that page) is really gone and not just covered. +
+Areas are given in points (1/72 inch) from the upper left corner of the page: `--redactArea 1:50,100,200,20`. +
+Both options can be repeated. Annotations (links, form fields) on redacted pages are dropped.
+
 === Load Protected PDFs
 
 Allows you to remove or change existing passwords. +

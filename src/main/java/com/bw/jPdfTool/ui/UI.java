@@ -3,6 +3,7 @@ package com.bw.jPdfTool.ui;
 import com.bw.jPdfTool.Log;
 import com.bw.jPdfTool.Main;
 import com.bw.jPdfTool.Preferences;
+import com.bw.jPdfTool.Redactor;
 import com.bw.jPdfTool.SignatureTool;
 import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.model.MergeOptions;
@@ -132,6 +133,7 @@ public class UI extends JSplitPane {
     private final JButton deleteButton = new JButton(getIcon("delete"));
     private final JButton renderToImageButton = new JButton("To Image");
     private final JButton renderAllToImageButton = new JButton("All to Images");
+    private final JButton redactButton = new JButton("Redact");
     private final JButton rotateClockwiseButton = new JButton(getIcon("rotateClockwise"));
     private final JButton rotateAllClockwiseButton = new JButton(getIcon("rotateAllClockwise"));
     private final JButton moveLeft = new JButton(getIcon("moveLeft"));
@@ -762,6 +764,11 @@ public class UI extends JSplitPane {
         renderAllToImageButton.addActionListener(e ->
                 runInBusy(this::doRenderAllToImage));
 
+        redactButton.setOpaque(false);
+        redactButton.setEnabled(false);
+        redactButton.setToolTipText("Permanently removes areas or text from the current page.");
+        redactButton.addActionListener(e -> doRedact());
+
         rotateClockwiseButton.setOpaque(false);
         rotateClockwiseButton.setToolTipText("Rotates the current page clockwise.");
         rotateClockwiseButton.addActionListener(e -> doRotateClockwise());
@@ -809,7 +816,7 @@ public class UI extends JSplitPane {
         gc.gridwidth = 2;
         pageManipulation.add(quality, gc);
 
-        gc.gridwidth = 2;
+        gc.gridwidth = 3;
         gc.gridx = 2;
         gc.gridy = 0;
         gc.fill = GridBagConstraints.NONE;
@@ -830,24 +837,26 @@ public class UI extends JSplitPane {
         pageManipulation.add(rotateAllClockwiseButton, gc);
 
         gc.gridy++;
-        gc.gridx = 4;
+        gc.gridx = 5;
         pageManipulation.add(deleteButton, gc);
         gc.gridx = 2;
         pageManipulation.add(moveLeft, gc);
         gc.gridx++;
         pageManipulation.add(moveRight, gc);
 
-        gc.gridx = 4;
+        gc.gridx = 5;
         gc.gridy = 0;
         gc.gridheight = 2;
         gc.anchor = GridBagConstraints.NORTH;
         pageManipulation.add(exportImages, gc);
 
-        gc.gridx = 3;
-        gc.gridy++;
-        gc.weightx = 0.1;
+        gc.gridx = 4;
+        gc.gridy = 2;
+        gc.gridwidth = 1;
         gc.gridheight = 1;
-        pageManipulation.add(Box.createHorizontalGlue(), gc);
+        gc.anchor = GridBagConstraints.NORTHEAST;
+        pageManipulation.add(redactButton, gc);
+
         pageManipulation.setBorder(BorderFactory.createTitledBorder("Page Manipulation"));
         return pageManipulation;
     }
@@ -1010,11 +1019,15 @@ public class UI extends JSplitPane {
                 }
             }
 
+            JMenuItem redactionColor = new JMenuItem("Redaction Color...");
+            redactionColor.addActionListener(e -> RedactionDialog.chooseColor(this));
+
             JMenu options = new JMenu("Options");
             options.add(storePasswords);
             options.add(encryptionKeyLengthMenu);
             options.add(laf);
             options.add(renderQuality);
+            options.add(redactionColor);
 
             if (Log.DEBUG) {
                 JMenu viewerQuality = new JMenu("Viewer Quality (debug mode)");
@@ -1185,6 +1198,30 @@ public class UI extends JSplitPane {
             page.document.renderPageToImage(page.pageNb);
             toaster.toast(ToastType.SUCCESS, 5000, "<html>Converted to %d dpi image</html>",
                     Preferences.getInstance().getDpi());
+        }
+    }
+
+    /**
+     * Opens the redaction dialog for the selected page and redacts the selected regions.
+     */
+    protected void doRedact() {
+        PageWidget pw = pages.getSelectedPage();
+        if (pw != null && documentProxy != null && documentProxy.getDocument() != null) {
+            Page page = pw.getPage();
+            List<Redactor.Region> regions = RedactionDialog.showDialog(
+                    SwingUtilities.getWindowAncestor(this), documentProxy.getDocument(), page.pageNb);
+            if (regions != null) {
+                runInBusy(() -> {
+                    try {
+                        documentProxy.redact(regions);
+                        toaster.toast(ToastType.SUCCESS, 5000, "<html>Redacted %d areas</html>", regions.size());
+                    } catch (Exception e) {
+                        Log.exception(e);
+                        toaster.toast(ToastType.ERROR, 20000,
+                                "<html><font size='+2'>Redaction failed</font><br><font size='+1'><i>%s</i></font></html>", e.getMessage());
+                    }
+                });
+            }
         }
     }
 
@@ -1509,6 +1546,7 @@ public class UI extends JSplitPane {
         boolean enabled = page != null;
         deleteButton.setEnabled(enabled);
         renderToImageButton.setEnabled(enabled);
+        redactButton.setEnabled(enabled);
         rotateClockwiseButton.setEnabled(enabled);
         moveLeft.setEnabled(enabled);
         moveRight.setEnabled(enabled);

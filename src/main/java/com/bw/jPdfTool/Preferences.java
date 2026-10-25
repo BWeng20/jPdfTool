@@ -1,5 +1,6 @@
 package com.bw.jPdfTool;
 
+import java.awt.Color;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
 
@@ -54,6 +55,11 @@ public class Preferences {
      * User preferences key for the dpi quality option.
      */
     public final static String USER_PREF_DPI = "dpi";
+
+    /**
+     * User preferences key for the color of redacted areas (RGB).
+     */
+    public final static String USER_PREF_REDACTION_COLOR = "redaction-color";
 
     public final static String USER_PREF_VIEWER_ANTIALIASING = "ViewerAA";
     public final static boolean USER_PREF_VIEWER_ANTIALIASING_DEFAULT = true;
@@ -126,6 +132,19 @@ public class Preferences {
         else if (dpiSetting > 1200)
             dpiSetting = 1200;
         return dpiSetting;
+    }
+
+    /**
+     * Get setting {@value USER_PREF_REDACTION_COLOR}.
+     *
+     * @return the color used to paint redacted areas, black by default.
+     */
+    public Color getRedactionColor() {
+        return new Color(this.getInt(USER_PREF_REDACTION_COLOR, 0) & 0xFFFFFF);
+    }
+
+    public void setRedactionColor(Color color) {
+        this.set(USER_PREF_REDACTION_COLOR, color.getRGB() & 0xFFFFFF);
     }
 
     public String getString(String key, String defaultValue) {

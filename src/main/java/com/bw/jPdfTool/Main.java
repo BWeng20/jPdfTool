@@ -11,6 +11,7 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
+import java.awt.geom.Rectangle2D;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.regex.Pattern;
 
 /**
  * CLI interface. Accepts file names as arguments and opens the UI or executes commands headless.
@@ -84,6 +86,14 @@ public class Main implements Callable<Integer> {
     @Option(names = {"-cpw", "--certificatePassword"}, paramLabel = "<password for p12 file>", description =
             "Password for the certificate.")
     private String signCertPassword = null;
+
+    @Option(names = {"-rt", "--redactText"}, paramLabel = "<regex>", description =
+            "Permanently removes all text matching the regular expression. The affected pages are converted to images.")
+    private List<String> redactTexts = new ArrayList<>();
+
+    @Option(names = {"-ra", "--redactArea"}, paramLabel = "<page>:<x>,<y>,<width>,<height>", description =
+            "Permanently removes an area. Values in points (1/72 inch) from the upper left corner of the page, e.g. '1:50,100,200,20'. The affected pages are converted to images.")
+    private List<String> redactAreas = new ArrayList<>();
 
     @Spec
     private CommandSpec spec;
@@ -196,8 +206,25 @@ public class Main implements Callable<Integer> {
                 System.out.println("Merging " + mo);
             }
 
+            List<Pattern> textPatterns = new ArrayList<>();
+            List<Redactor.Region> areas = new ArrayList<>();
+            try {
+                for (String t : redactTexts)
+                    textPatterns.add(Pattern.compile(t));
+                for (String a : redactAreas)
+                    areas.add(parseRedactArea(a));
+            } catch (IllegalArgumentException e) {
+                System.err.println("error in redact argument: " + e.getMessage());
+                usage(System.err);
+                return 6;
+            }
+
             // TODO: Currently all input files are merged and protected.
             executer.loadDocuments(password2Load, mo);
+
+            if (!textPatterns.isEmpty() || !areas.isEmpty()) {
+                System.out.println("Redacted " + executer.redact(textPatterns, areas) + " areas");
+            }
 
             AccessPermission ap = new AccessPermission();
             ap.setCanPrint(canPrint);
@@ -234,6 +261,24 @@ public class Main implements Callable<Integer> {
             executer.close();
         }
         return 0;
+    }
+
+    /**
+     * Parses "page:x,y,width,height".
+     *
+     * @throws IllegalArgumentException If the argument is malformed (including NumberFormatException).
+     */
+    static Redactor.Region parseRedactArea(String arg) {
+        String[] pageAndArea = arg.split(":");
+        String[] v = pageAndArea.length == 2 ? pageAndArea[1].split(",") : new String[0];
+        if (v.length != 4)
+            throw new IllegalArgumentException("'" + arg + "' doesn't match <page>:<x>,<y>,<width>,<height>");
+        int page = Integer.parseInt(pageAndArea[0].trim());
+        double x = Double.parseDouble(v[0].trim());
+        double y = Double.parseDouble(v[1].trim());
+        double w = Double.parseDouble(v[2].trim());
+        double h = Double.parseDouble(v[3].trim());
+        return new Redactor.Region(page, new Rectangle2D.Double(x, y, w, h));
     }
 
     protected void createUI() {

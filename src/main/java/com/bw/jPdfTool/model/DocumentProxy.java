@@ -2,6 +2,7 @@ package com.bw.jPdfTool.model;
 
 import com.bw.jPdfTool.Log;
 import com.bw.jPdfTool.Preferences;
+import com.bw.jPdfTool.Redactor;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
@@ -370,6 +371,25 @@ public class DocumentProxy {
         }
         refirePages();
 
+    }
+
+    /**
+     * Permanently removes the regions, see {@link Redactor}. The affected pages are replaced by images.
+     *
+     * @param regions Regions in unrotated page coordinates.
+     */
+    public void redact(List<Redactor.Region> regions) throws IOException {
+        ensuredDocument();
+        Preferences prefs = Preferences.getInstance();
+        Redactor.redact(document, regions, prefs.getDpi(), prefs.getRedactionColor());
+        synchronized (this) {
+            for (Redactor.Region r : regions) {
+                Page p = pages.get(r.pageNb - 1);
+                p.image = null;
+                p.scale = 0;
+            }
+        }
+        refirePages();
     }
 
     public void deletePage(int pageNb) {
