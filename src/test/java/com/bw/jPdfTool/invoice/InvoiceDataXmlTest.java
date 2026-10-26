@@ -260,6 +260,95 @@ class InvoiceDataXmlTest {
         Assertions.assertEquals(BigDecimal.ZERO.setScale(2), d.totals().vat());
     }
 
+    @Test
+    void exemptionReasonCanBeEdited() throws Exception {
+        InvoiceData d = InvoiceDataTest.sample();
+        d.lines.clear();
+        d.lines.add(new InvoiceData.Line("Service", BigDecimal.ONE, "C62", new BigDecimal("100"), BigDecimal.ZERO));
+        // The editor calculates after every key: the first letter must not stick.
+        d.vatExemptionReason = "K";
+        d.totals();
+        d.vatExemptionReason = "Kleinunternehmer gemäß § 19 UStG";
+        d.totals();
+        Assertions.assertEquals("Kleinunternehmer gemäß § 19 UStG", InvoiceData.fromXml(d.toXml()).vatExemptionReason);
+
+        // An opened invoice: the reason can be changed.
+        InvoiceData r = InvoiceData.fromXml(d.toXml());
+        r.vatExemptionReason = "Another reason";
+        String s = new String(r.toXml(), StandardCharsets.UTF_8);
+        Assertions.assertTrue(s.contains("Another reason"), s);
+        Assertions.assertFalse(s.contains("Kleinunternehmer"), s);
+    }
+
+    @Test
+    void endpointIdIsNotTheEmail() throws Exception {
+        String xml = new String(InvoiceDataTest.sample().toXml(), StandardCharsets.UTF_8);
+        String endpoint = xml.replaceFirst("<ram:URIID schemeID=\"EM\">billing@example.com</ram:URIID>",
+                "<ram:URIID schemeID=\"0088\">0088:123</ram:URIID>");
+        Assertions.assertNotEquals(xml, endpoint, "test data has the e-mail as URIID");
+
+        InvoiceData d = InvoiceData.fromXml(endpoint.getBytes(StandardCharsets.UTF_8));
+        Assertions.assertEquals("billing@example.com", d.seller.email, "from the contact");
+        String back = new String(d.toXml(), StandardCharsets.UTF_8);
+        Assertions.assertTrue(back.contains("<ram:URIID schemeID=\"0088\">0088:123</ram:URIID>"), "the endpoint is kept:\n" + back);
+        Assertions.assertTrue(back.contains("billing@example.com"), back);
+    }
+
+    @Test
+    void amountsOfAProfileWithoutItems() throws Exception {
+        InvoiceData d = InvoiceDataTest.sample();
+        d.profile = "urn:factur-x.eu:1p0:basicwl";
+        d.totals();
+        Assertions.assertEquals(2, d.vatAmounts.size());
+
+        // The last row can be deleted, it isn't added again.
+        d.vatAmounts.clear();
+        d.totals();
+        d.toXml();
+        Assertions.assertEquals(0, d.vatAmounts.size());
+
+        // Back to items, change a price: the amounts follow from the new prices.
+        d.profile = InvoiceData.PROFILE_EN16931;
+        d.totals();
+        d.lines.get(0).price = new BigDecimal("100.00");
+        d.profile = "urn:factur-x.eu:1p0:basicwl";
+        d.totals();
+        Assertions.assertEquals(2, d.vatAmounts.size());
+        Assertions.assertEquals(0, new BigDecimal("800").compareTo(d.vatAmounts.get(0).net), d.vatAmounts.get(0).net.toString());
+    }
+
+    @Test
+    void outsideOfScopeKeepsItsReason() throws Exception {
+        InvoiceData d = InvoiceDataTest.sample();
+        d.lines.clear();
+        d.lines.add(new InvoiceData.Line("Service", BigDecimal.ONE, "C62", new BigDecimal("100"), BigDecimal.ZERO));
+        d.vatExemptionReason = "Outside the scope of VAT";
+        d.profile = "urn:factur-x.eu:1p0:basicwl";
+        String xml = new String(d.toXml(), StandardCharsets.UTF_8)
+                .replace("<ram:CategoryCode>E</ram:CategoryCode>", "<ram:CategoryCode>O</ram:CategoryCode>")
+                .replaceAll("<ram:RateApplicablePercent>0(\\.00)?</ram:RateApplicablePercent>", "");
+        Assertions.assertTrue(xml.contains("<ram:CategoryCode>O</ram:CategoryCode>"), xml);
+
+        InvoiceData r = InvoiceData.fromXml(xml.getBytes(StandardCharsets.UTF_8));
+        byte[] back = r.toXml();
+        Assertions.assertTrue(new String(back, StandardCharsets.UTF_8).contains("Outside the scope of VAT"),
+                "the reason is kept");
+        Assertions.assertEquals(List.of("O"), InvoiceTotals.categories(CiiXml.parse(back).getDocumentElement()));
+    }
+
+    @Test
+    void allowanceWithoutCategoryAddsNoVatEntry() throws Exception {
+        String plain = new InvoiceXmlGenerator(5).create();
+        String allowance = "<ram:SpecifiedTradeAllowanceCharge><ram:ChargeIndicator><udt:Indicator>false</udt:Indicator>"
+                + "</ram:ChargeIndicator><ram:ActualAmount>10.00</ram:ActualAmount><ram:Reason>Discount</ram:Reason>"
+                + "</ram:SpecifiedTradeAllowanceCharge>\n";
+        String with = plain.replace("<ram:SpecifiedTradePaymentTerms>", allowance + "<ram:SpecifiedTradePaymentTerms>");
+        Assertions.assertNotEquals(plain, with);
+        List<String> expected = InvoiceTotals.categories(rootOf(InvoiceData.fromXml(plain.getBytes(StandardCharsets.UTF_8))));
+        List<String> actual = InvoiceTotals.categories(rootOf(InvoiceData.fromXml(with.getBytes(StandardCharsets.UTF_8))));
+        Assertions.assertEquals(expected, actual);
+    }
+
     private static org.w3c.dom.Element rootOf(InvoiceData d) throws Exception {
         return CiiXml.parse(d.toXml()).getDocumentElement();
     }

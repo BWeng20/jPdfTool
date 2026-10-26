@@ -4,6 +4,7 @@ import com.bw.jPdfTool.ui.CollapsibleTextPanel;
 import com.bw.jPdfTool.ui.UI;
 
 import com.bw.jPdfTool.invoice.EInvoice;
+import com.bw.jPdfTool.invoice.InvoiceData;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -83,7 +84,7 @@ public class InvoiceDialog extends JDialog {
         // The data block follows the width of the dialog.
         center.add(summary == null ? createError(error) : createSummary(summary), BorderLayout.NORTH);
         // Without readable data, the XML is all there is: show it directly.
-        center.add(new CollapsibleTextPanel(prettyXml(xml), "Show XML", "Hide XML", summary == null),
+        center.add(new CollapsibleTextPanel(InvoiceData.prettyXml(xml), "Show XML", "Hide XML", summary == null),
                 BorderLayout.CENTER);
 
         JButton close = new JButton("Close");
@@ -386,50 +387,6 @@ public class InvoiceDialog extends JDialog {
             return nf.format(value);
         } catch (Exception e) {
             return currency == null ? amount : amount + " " + currency;
-        }
-    }
-
-    /**
-     * Indents the XML for display. The stored attachment is not changed.
-     *
-     * @return The indented XML, or the XML as it is if it can't be parsed.
-     */
-    static String prettyXml(byte[] xml) {
-        try {
-            javax.xml.parsers.DocumentBuilderFactory dbf = javax.xml.parsers.DocumentBuilderFactory.newInstance();
-            dbf.setNamespaceAware(true);
-            dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            javax.xml.parsers.DocumentBuilder builder = dbf.newDocumentBuilder();
-            // Don't print parse errors to the console, the text is shown as it is then.
-            builder.setErrorHandler(new org.xml.sax.helpers.DefaultHandler());
-            org.w3c.dom.Document doc = builder.parse(new java.io.ByteArrayInputStream(xml));
-            removeWhitespace(doc.getDocumentElement());
-
-            // The JDK's own transformer: others on the class path (e.g. Saxon) handle the indent options differently.
-            javax.xml.transform.TransformerFactory tf = javax.xml.transform.TransformerFactory.newDefaultInstance();
-            javax.xml.transform.Transformer t = tf.newTransformer();
-            t.setOutputProperty(javax.xml.transform.OutputKeys.INDENT, "yes");
-            t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2");
-            t.setOutputProperty(javax.xml.transform.OutputKeys.ENCODING, "UTF-8");
-            java.io.StringWriter out = new java.io.StringWriter();
-            t.transform(new javax.xml.transform.dom.DOMSource(doc), new javax.xml.transform.stream.StreamResult(out));
-            return out.toString().trim();
-        } catch (Exception e) {
-            return new String(xml, StandardCharsets.UTF_8);
-        }
-    }
-
-    /**
-     * Removes text nodes that contain only white space, otherwise the indentation adds empty lines.
-     */
-    private static void removeWhitespace(org.w3c.dom.Node node) {
-        org.w3c.dom.NodeList children = node.getChildNodes();
-        for (int i = children.getLength() - 1; i >= 0; --i) {
-            org.w3c.dom.Node child = children.item(i);
-            if (child.getNodeType() == org.w3c.dom.Node.TEXT_NODE && child.getTextContent().isBlank())
-                node.removeChild(child);
-            else
-                removeWhitespace(child);
         }
     }
 

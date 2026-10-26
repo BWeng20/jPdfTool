@@ -1,6 +1,7 @@
 package com.bw.jPdfTool.ui.invoice;
 
 import com.bw.jPdfTool.invoice.EInvoice;
+import com.bw.jPdfTool.invoice.InvoiceData;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -56,10 +57,10 @@ class InvoiceDialogTest {
 
     @Test
     void prettyXml() {
-        String pretty = InvoiceDialog.prettyXml("<a><b>x</b><c/></a>".getBytes(StandardCharsets.UTF_8));
+        String pretty = InvoiceData.prettyXml("<a><b>x</b><c/></a>".getBytes(StandardCharsets.UTF_8));
         Assertions.assertTrue(pretty.contains("\n  <b>x</b>"), pretty);
         // Not parseable: shown as it is.
-        Assertions.assertEquals("<a><b>", InvoiceDialog.prettyXml("<a><b>".getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertEquals("<a><b>", InvoiceData.prettyXml("<a><b>".getBytes(StandardCharsets.UTF_8)));
     }
 
     private static byte[] sample() throws Exception {

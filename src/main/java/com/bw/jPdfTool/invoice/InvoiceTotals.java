@@ -35,7 +35,8 @@ final class InvoiceTotals {
 
     private record TaxKey(String category, BigDecimal rate) {
         TaxKey {
-            rate = rate == null ? null : rate.stripTrailingZeros();
+            // Category "O" (outside of scope) has no rate: one with and one without rate are the same entry.
+            rate = rate == null || "O".equals(category) ? null : rate.stripTrailingZeros();
         }
     }
 
@@ -73,9 +74,11 @@ final class InvoiceTotals {
                 charges = charges.add(amount);
             else
                 allowances = allowances.add(amount);
+            // Without a VAT category the amount belongs to no entry of the breakdown.
             Element tax = find(ac, "CategoryTradeTax");
-            basis.merge(new TaxKey(text(tax, "CategoryCode"), decimal(text(tax, "RateApplicablePercent"))),
-                    charge ? amount : amount.negate(), BigDecimal::add);
+            if (tax != null)
+                basis.merge(new TaxKey(text(tax, "CategoryCode"), decimal(text(tax, "RateApplicablePercent"))),
+                        charge ? amount : amount.negate(), BigDecimal::add);
         }
 
         // VAT breakdown: one entry per category and rate. Existing entries keep their other data (e.g. exemption reason).
@@ -210,9 +213,9 @@ final class InvoiceTotals {
         }
         setAmount(t, amount, "CalculatedAmount");
         setAmount(t, base, "BasisAmount");
-        if (EXEMPT_CATEGORIES.contains(key.category()) && text(t, "ExemptionReason") == null
-                && text(t, "ExemptionReasonCode") == null && exemptionReason != null && !exemptionReason.isBlank())
-            set(t, exemptionReason, "ExemptionReason");
+        if (EXEMPT_CATEGORIES.contains(key.category()) && text(t, "ExemptionReasonCode") == null
+                && exemptionReason != null && !exemptionReason.isBlank())
+            set(t, exemptionReason.trim(), "ExemptionReason");
     }
 
     /**

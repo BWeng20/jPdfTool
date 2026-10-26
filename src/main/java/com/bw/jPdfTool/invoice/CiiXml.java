@@ -144,20 +144,42 @@ final class CiiXml {
      * @throws IOException If it's no XML or no CII invoice.
      */
     static Document parse(byte[] xml) throws IOException {
+        Document doc = parseXml(xml);
+        Element root = doc.getDocumentElement();
+        if (!ROOT.equals(root.getLocalName()) || !RSM.equals(root.getNamespaceURI()))
+            throw new IOException("Only CII invoices (ZUGFeRD 2, Factur-X, XRechnung CII) can be edited, found <"
+                    + root.getNodeName() + ">.");
+        return doc;
+    }
+
+    /**
+     * Parses any XML. White space between elements is removed.
+     */
+    private static Document parseXml(byte[] xml) throws IOException {
         Document doc;
         try {
             DocumentBuilder builder = newBuilder();
+            // Don't print parse errors to the console.
             builder.setErrorHandler(new org.xml.sax.helpers.DefaultHandler());
             doc = builder.parse(new ByteArrayInputStream(xml));
         } catch (Exception e) {
             throw new IOException("The invoice XML can't be read: " + e.getMessage(), e);
         }
-        Element root = doc.getDocumentElement();
-        if (!ROOT.equals(root.getLocalName()) || !RSM.equals(root.getNamespaceURI()))
-            throw new IOException("Only CII invoices (ZUGFeRD 2, Factur-X, XRechnung CII) can be edited, found <"
-                    + root.getNodeName() + ">.");
-        removeWhitespace(root);
+        removeWhitespace(doc.getDocumentElement());
         return doc;
+    }
+
+    /**
+     * Indents any XML for display.
+     *
+     * @return The indented XML, or the XML as it is if it can't be parsed.
+     */
+    static String pretty(byte[] xml) {
+        try {
+            return new String(serialize(parseXml(xml)), StandardCharsets.UTF_8).trim();
+        } catch (Exception e) {
+            return new String(xml, StandardCharsets.UTF_8);
+        }
     }
 
     /**

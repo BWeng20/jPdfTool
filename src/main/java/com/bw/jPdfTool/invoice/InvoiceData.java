@@ -76,11 +76,6 @@ public final class InvoiceData {
     }
 
     private static final String PARTIES_KEY = "parties";
-    /**
-     * Separate lists of an earlier version of the file. Merged into the list on load, removed on save.
-     */
-    private static final String OLD_SELLERS_KEY = "sellers";
-    private static final String OLD_BUYERS_KEY = "buyers";
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
@@ -101,8 +96,6 @@ public final class InvoiceData {
         if (root == null)
             return parties;
         parties.addAll(readList(root.get(PARTIES_KEY)));
-        mergeOldList(parties, readList(root.get(OLD_SELLERS_KEY)), Role.SELLER);
-        mergeOldList(parties, readList(root.get(OLD_BUYERS_KEY)), Role.BUYER);
         return parties;
     }
 
@@ -178,8 +171,6 @@ public final class InvoiceData {
         }
         if (root == null)
             root = MAPPER.createObjectNode();
-        root.remove(OLD_SELLERS_KEY);
-        root.remove(OLD_BUYERS_KEY);
         root.set(PARTIES_KEY, MAPPER.valueToTree(parties));
         byte[] json = MAPPER.writeValueAsBytes(root);
         SafeFile.write(file, os -> os.write(json));
@@ -360,6 +351,11 @@ public final class InvoiceData {
     private boolean isProfile(String part) {
         return profile != null && profile.toLowerCase(Locale.ROOT).contains(part);
     }
+
+    /**
+     * If the profile had items at the last update. Used to detect a change to a profile without items.
+     */
+    private boolean itemsShown = true;
 
     /**
      * Checks if the profile has items. MINIMUM and BASIC WL have none, they use {@link #vatAmounts}.
@@ -548,8 +544,12 @@ public final class InvoiceData {
 
         Element tx = ensure(root, "SupplyChainTradeTransaction");
         boolean items = hasItems();
-        if (!items && vatAmounts.isEmpty())
+        // Changing from a profile with items to one without: the amounts follow from the items.
+        if (!items && itemsShown) {
+            vatAmounts.clear();
             amountsFromItems();
+        }
+        itemsShown = items;
         // MINIMUM and BASIC WL allow no items. The items stay in the list, in case the profile is changed back.
         writeLines(tx, items ? lines : List.of());
 
@@ -624,7 +624,8 @@ public final class InvoiceData {
         writeTaxRegistration(tp, "FC", details ? p.taxId : null);
 
         String email = supports(isSeller ? Field.SELLER_EMAIL : Field.BUYER_DETAILS) ? trim(p.email) : null;
-        if (!Objects.equals(text(tp, "URIUniversalCommunication", "URIID"), email)) {
+        if (isEmailUri(find(tp, "URIUniversalCommunication", "URIID"))
+                && !Objects.equals(text(tp, "URIUniversalCommunication", "URIID"), email)) {
             Element id = set(tp, email, "URIUniversalCommunication", "URIID");
             if (id != null)
                 id.setAttribute("schemeID", "EM");
@@ -881,6 +882,7 @@ public final class InvoiceData {
         vatAmounts.clear();
         if (!hasItems())
             readVatAmounts(settlement);
+        itemsShown = hasItems();
     }
 
     /**
@@ -920,6 +922,26 @@ public final class InvoiceData {
         vatAmounts.add(a);
     }
 
+    /**
+     * Indents the XML for display. The stored attachment is not changed.
+     *
+     * @return The indented XML, or the XML as it is if it can't be parsed.
+     */
+    public static String prettyXml(byte[] xml) {
+        return CiiXml.pretty(xml);
+    }
+
+    /**
+     * True if the URI element is absent or holds an e-mail address. Other values are endpoint IDs (BT-34, e.g. Peppol)
+     * and must neither be read as nor overwritten by the e-mail.
+     */
+    private static boolean isEmailUri(Element uri) {
+        if (uri == null)
+            return true;
+        String scheme = uri.getAttribute("schemeID");
+        return scheme.isEmpty() ? text(uri) == null || text(uri).contains("@") : "EM".equals(scheme);
+    }
+
     private static void readParty(Element tp, Party p) {
         p.name = text(tp, "Name");
         p.street = text(tp, "PostalTradeAddress", "LineOne");
@@ -928,7 +950,8 @@ public final class InvoiceData {
         p.country = text(tp, "PostalTradeAddress", "CountryID");
         p.vatId = text(taxRegistration(tp, "VA"), "ID");
         p.taxId = text(taxRegistration(tp, "FC"), "ID");
-        p.email = text(tp, "URIUniversalCommunication", "URIID");
+        Element uri = find(tp, "URIUniversalCommunication", "URIID");
+        p.email = isEmailUri(uri) ? text(uri) : null;
         p.contactName = text(tp, "DefinedTradeContact", "PersonName");
         p.phone = text(tp, "DefinedTradeContact", "TelephoneUniversalCommunication", "CompleteNumber");
         if (p.email == null)

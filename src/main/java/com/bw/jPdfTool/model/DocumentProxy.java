@@ -415,7 +415,7 @@ public class DocumentProxy {
      * Attaches an invoice XML (ZUGFeRD/Factur-X) to the effective document, see {@link EInvoice#attachXml}.
      * An existing invoice is replaced. The visible pages are not changed.
      *
-     * @throws EInvoice.NotConformException If the result would be no valid invoice. The document is not changed then.
+     * @throws EInvoice.NotConformException If the result was no valid invoice. The document is not changed then.
      */
     public void attachInvoice(byte[] xml) throws IOException {
         ensuredDocument();

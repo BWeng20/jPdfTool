@@ -5,6 +5,7 @@ import com.bw.jPdfTool.invoice.Party;
 import com.bw.jPdfTool.invoice.InvoiceData;
 import com.bw.jPdfTool.Log;
 import com.bw.jPdfTool.Preferences;
+import com.bw.jPdfTool.SafeFile;
 import com.bw.jPdfTool.invoice.Role;
 
 import javax.swing.BorderFactory;
@@ -161,6 +162,14 @@ public class InvoiceEditorDialog extends JDialog {
 
     private boolean dirty;
     private boolean working;
+    /** Why the sums can't be calculated, null if they can. */
+    private String totalsError;
+    /** Delays the update while the user types: it processes the whole invoice. */
+    private final javax.swing.Timer updateTimer = new javax.swing.Timer(200, e -> update());
+
+    {
+        updateTimer.setRepeats(false);
+    }
     private boolean attached;
 
     private InvoiceEditorDialog(Window owner, InvoiceData data, boolean existing, Attacher attacher) {
@@ -824,26 +833,32 @@ public class InvoiceEditorDialog extends JDialog {
 
     private List<String> problems() {
         List<String> p = new ArrayList<>(invalid.values());
+        if (totalsError != null)
+            p.add("The sums can't be calculated: " + totalsError);
         p.addAll(data.check());
         return p;
     }
 
     private void changed() {
         dirty = true;
-        update();
+        updateTimer.restart();
     }
 
     /**
      * Updates sums and status after a change.
      */
     private void update() {
+        updateTimer.stop();
         String currency = data.currency == null ? null : data.currency.trim().toUpperCase(Locale.ROOT);
         try {
             InvoiceData.Totals t = data.totals();
             netValue.setText(InvoiceDialog.formatAmount(t.net().toPlainString(), currency, locale));
             vatValue.setText(InvoiceDialog.formatAmount(t.vat().toPlainString(), currency, locale));
             grossValue.setText(InvoiceDialog.formatAmount(t.gross().toPlainString(), currency, locale));
+            totalsError = null;
         } catch (Exception e) {
+            Log.error("Failed to calculate the invoice sums: %s", e);
+            totalsError = String.valueOf(e.getMessage() != null ? e.getMessage() : e);
             netValue.setText("–");
             vatValue.setText("–");
             grossValue.setText("–");
@@ -957,7 +972,8 @@ public class InvoiceEditorDialog extends JDialog {
         if (file.exists() && !UI.askOverwrite(this, file.toPath()))
             return;
         try {
-            Files.write(file.toPath(), data.toXml());
+            byte[] xml = data.toXml();
+            SafeFile.write(file.toPath(), os -> os.write(xml));
             rememberPreset();
             dirty = false;
         } catch (Exception e) {

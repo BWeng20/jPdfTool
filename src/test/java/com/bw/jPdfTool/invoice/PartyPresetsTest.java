@@ -76,24 +76,6 @@ class PartyPresetsTest {
     }
 
     @Test
-    void oldSeparateListsAreMerged() throws Exception {
-        Path file = dir.resolve("parties.json");
-        Files.writeString(file, "{\"sellers\":[{\"name\":\"Own GmbH\"},{\"name\":\"Partner AG\"}],"
-                + "\"buyers\":[{\"name\":\"Customer KG\"},{\"name\":\"partner ag\"}]}");
-        List<Party> loaded = InvoiceData.loadParties(file);
-        Assertions.assertEquals(3, loaded.size(), "same name is merged");
-        Assertions.assertTrue(loaded.get(0).asSeller && !loaded.get(0).asBuyer);
-        Assertions.assertTrue(loaded.get(1).asSeller && loaded.get(1).asBuyer, "in both lists");
-        Assertions.assertTrue(!loaded.get(2).asSeller && loaded.get(2).asBuyer);
-
-        // Saving writes the new format only.
-        InvoiceData.saveParties(file, loaded);
-        String json = Files.readString(file);
-        Assertions.assertFalse(json.contains("\"sellers\"") || json.contains("\"buyers\""), json);
-        Assertions.assertEquals(3, InvoiceData.loadParties(file).size());
-    }
-
-    @Test
     void otherContentIsKept() throws Exception {
         Path file = dir.resolve("parties.json");
         Files.writeString(file, "{\"version\":2,\"parties\":[{\"name\":\"X\",\"future\":1}]}");

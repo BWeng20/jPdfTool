@@ -10,6 +10,8 @@ import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.bouncycastle.asn1.ASN1InputStream;
+import org.bouncycastle.asn1.cms.ContentInfo;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cms.CMSProcessableByteArray;
 import org.bouncycastle.cms.CMSSignedData;
@@ -218,7 +220,12 @@ class MainTest {
             // Verify the CMS signature against the signed bytes with the embedded certificate.
             byte[] signedContent = signature.getSignedContent(bytes);
             byte[] contents = signature.getContents(bytes);
-            CMSSignedData cms = new CMSSignedData(new CMSProcessableByteArray(signedContent), contents);
+            // /Contents is padded with zero bytes up to the reserved size: read the first object only.
+            ContentInfo contentInfo;
+            try (ASN1InputStream asn1 = new ASN1InputStream(contents)) {
+                contentInfo = ContentInfo.getInstance(asn1.readObject());
+            }
+            CMSSignedData cms = new CMSSignedData(new CMSProcessableByteArray(signedContent), contentInfo);
             SignerInformation signer = cms.getSignerInfos().getSigners().iterator().next();
             @SuppressWarnings("unchecked")
             X509CertificateHolder cert = (X509CertificateHolder) cms.getCertificates()
@@ -227,7 +234,7 @@ class MainTest {
 
             // Modified content must not verify.
             signedContent[signedContent.length / 2] ^= 1;
-            CMSSignedData tampered = new CMSSignedData(new CMSProcessableByteArray(signedContent), contents);
+            CMSSignedData tampered = new CMSSignedData(new CMSProcessableByteArray(signedContent), contentInfo);
             Assertions.assertFalse(verifies(tampered.getSignerInfos().getSigners().iterator().next(), cert),
                     "a modified document must not verify");
         }
