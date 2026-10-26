@@ -1,6 +1,6 @@
-package com.bw.jPdfTool.ui;
+package com.bw.jPdfTool.ui.invoice;
 
-import com.bw.jPdfTool.EInvoice;
+import com.bw.jPdfTool.invoice.EInvoice;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 

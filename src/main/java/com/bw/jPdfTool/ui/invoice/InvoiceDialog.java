@@ -1,7 +1,9 @@
-package com.bw.jPdfTool.ui;
+package com.bw.jPdfTool.ui.invoice;
 
-import com.bw.jPdfTool.EInvoice;
+import com.bw.jPdfTool.ui.CollapsibleTextPanel;
+import com.bw.jPdfTool.ui.UI;
 
+import com.bw.jPdfTool.invoice.EInvoice;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;

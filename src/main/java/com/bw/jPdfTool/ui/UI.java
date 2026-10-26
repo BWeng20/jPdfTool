@@ -1,7 +1,9 @@
 package com.bw.jPdfTool.ui;
 
+
+
 import com.bw.jPdfTool.DocumentInformation;
-import com.bw.jPdfTool.EInvoice;
+import com.bw.jPdfTool.invoice.EInvoice;
 import com.bw.jPdfTool.Log;
 import com.bw.jPdfTool.PdfStandard;
 import com.bw.jPdfTool.Main;
@@ -16,6 +18,10 @@ import com.bw.jPdfTool.model.RenderQueue;
 import com.bw.jPdfTool.toast.Toast;
 import com.bw.jPdfTool.toast.ToastType;
 import com.bw.jPdfTool.toast.Toaster;
+import com.bw.jPdfTool.ui.invoice.InvoiceDialog;
+import com.bw.jPdfTool.ui.invoice.InvoiceEditorDialog;
+import com.bw.jPdfTool.ui.invoice.PartySettingsDialog;
+import com.bw.jPdfTool.ui.invoice.ValidationDialog;
 import com.bw.jtools.svg.SVGConverter;
 import com.bw.jtools.ui.ShapeIcon;
 import com.bw.jtools.ui.ShapeMultiResolutionImage;
@@ -1073,6 +1079,12 @@ public class UI extends JSplitPane {
             options.add(renderQuality);
             options.add(redactionColor);
 
+            options.addSeparator();
+            JMenuItem parties = new JMenuItem("Invoice Parties…");
+            parties.setToolTipText("Seller and buyer presets for the invoice editor.");
+            parties.addActionListener(e -> PartySettingsDialog.showDialog(this));
+            options.add(parties);
+
             if (Log.isDebug()) {
                 JMenu viewerQuality = new JMenu("Viewer Quality (debug mode)");
 
@@ -1299,6 +1311,8 @@ public class UI extends JSplitPane {
 
         JMenuItem show = new JMenuItem("Show Invoice…");
         show.addActionListener(e -> doShowInvoice());
+        JMenuItem edit = new JMenuItem("Create Invoice…");
+        edit.addActionListener(e -> doEditInvoice());
         JMenuItem validate = new JMenuItem("Validate…");
         validate.setToolTipText("Checks PDF/A-3 and the EN 16931 rules of the current document.");
         validate.addActionListener(e -> doValidateInvoice());
@@ -1311,6 +1325,7 @@ public class UI extends JSplitPane {
         remove.addActionListener(e -> doRemoveInvoice());
 
         menu.add(show);
+        menu.add(edit);
         menu.add(validate);
         menu.addSeparator();
         menu.add(save);
@@ -1329,6 +1344,11 @@ public class UI extends JSplitPane {
 
                 boolean supported = hasDocument && EInvoice.supportsInvoice(documentProxy.getDocument());
                 attach.setEnabled(supported);
+                edit.setEnabled(supported);
+                edit.setText(hasInvoice ? "Edit Invoice…" : "Create Invoice…");
+                edit.setToolTipText(hasDocument && !supported
+                        ? "<html>E-invoices need PDF/A-3, which is based on PDF 1.7.<br>A PDF 2.0 document can't be conform.</html>"
+                        : "Enter the invoice data. The invoice is attached as ZUGFeRD/Factur-X XML.");
                 if (hasDocument && !supported) {
                     attach.setText(ATTACH_INVOICE + " (not for PDF 2.0)");
                     attach.setToolTipText("<html>E-invoices need PDF/A-3, which is based on PDF 1.7.<br>"
@@ -1388,6 +1408,24 @@ public class UI extends JSplitPane {
         } catch (IOException e) {
             invoiceError("Failed to read invoice", e);
         }
+    }
+
+    /**
+     * Opens the invoice editor. Edits the existing invoice of the document or creates a new one.
+     */
+    protected void doEditInvoice() {
+        if (documentProxy == null || documentProxy.getDocument() == null)
+            return;
+        byte[] xml;
+        try {
+            xml = EInvoice.extractXml(documentProxy.getDocument()).orElse(null);
+        } catch (IOException e) {
+            invoiceError("Failed to read invoice", e);
+            return;
+        }
+        final DocumentProxy proxy = documentProxy;
+        if (InvoiceEditorDialog.showDialog(this, xml, proxy::attachInvoice))
+            toaster.toast(ToastType.SUCCESS, 5000, "<html>%s invoice</html>", xml == null ? "Attached" : "Updated");
     }
 
     protected void doValidateInvoice() {

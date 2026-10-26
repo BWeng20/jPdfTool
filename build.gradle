@@ -44,8 +44,8 @@ dependencies {
     implementation "com.formdev:flatlaf-fonts-roboto:2.137"
     implementation "io.github.bweng20:jSVGIcon:1.6"
 
-    implementation "org.bouncycastle:bcprov-jdk18on:1.81"
-    implementation "org.bouncycastle:bcpkix-jdk18on:1.81"
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.86'
+    implementation 'org.bouncycastle:bcpkix-jdk18on:1.86'
 
     implementation "org.apache.pdfbox:pdfbox:${pdfboxVersion}"
     implementation "org.apache.pdfbox:fontbox:${pdfboxVersion}"
@@ -55,6 +55,8 @@ dependencies {
     implementation "org.mustangproject:library:${mustangVersion}"
     implementation "org.mustangproject:validator:${mustangVersion}"
     implementation 'org.slf4j:slf4j-nop:2.0.17'
+    // Seller presets (sellers.json). Version used by Mustang, otherwise Gradle silently upgrades.
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.22.4'
 
     implementation("info.picocli:picocli:${picocliVersion}")
     annotationProcessor("info.picocli:picocli-codegen:${picocliVersion}")

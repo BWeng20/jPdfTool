@@ -1,6 +1,6 @@
 package com.bw.jPdfTool.cli;
 
-import com.bw.jPdfTool.EInvoice;
+import com.bw.jPdfTool.invoice.EInvoice;
 import com.bw.jPdfTool.Log;
 import com.bw.jPdfTool.Preferences;
 import com.bw.jPdfTool.Redactor;

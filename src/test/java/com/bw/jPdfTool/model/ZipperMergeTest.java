@@ -1,5 +1,6 @@
 package com.bw.jPdfTool.model;
 
+import com.bw.jPdfTool.invoice.EInvoice;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -89,7 +90,7 @@ class ZipperMergeTest {
         DocumentProxy proxy = new DocumentProxy(new RenderQueue());
         try {
             proxy.loaderFinished(org.apache.pdfbox.Loader.loadPDF(
-                    com.bw.jPdfTool.EInvoice.attachXml(plainPdf(), invoiceXml())), new MergeOptions());
+                    EInvoice.attachXml(plainPdf(), invoiceXml())), new MergeOptions());
             int[] calls = {0};
             proxy.addDocumentConsumer(new DocumentProxy.DocumentConsumer() {
                 @Override

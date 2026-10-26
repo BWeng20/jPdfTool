@@ -1,4 +1,4 @@
-package com.bw.jPdfTool;
+package com.bw.jPdfTool.invoice;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -13,16 +13,17 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 
-class EInvoiceTest {
+public class EInvoiceTest {
 
-    static byte[] sampleXml() throws IOException {
+    public static byte[] sampleXml() throws IOException {
         try (InputStream is = EInvoiceTest.class.getResourceAsStream("/factur-x-minimum.xml")) {
             return is.readAllBytes();
         }
     }
 
-    static byte[] plainPdf(int pages) throws IOException {
+    public static byte[] plainPdf(int pages) throws IOException {
         try (PDDocument doc = new PDDocument()) {
             // Pages without resources on purpose: Mustang needs a workaround for them, see EInvoice.addMissingResources.
             for (int i = 0; i < pages; ++i)
@@ -36,7 +37,7 @@ class EInvoiceTest {
     /**
      * A PDF with a not embedded font: it can't be PDF/A.
      */
-    static byte[] nonConformPdf() throws IOException {
+    public static byte[] nonConformPdf() throws IOException {
         try (PDDocument doc = new PDDocument()) {
             PDPage page = new PDPage();
             doc.addPage(page);
@@ -53,7 +54,7 @@ class EInvoiceTest {
         }
     }
 
-    static byte[] invoicePdf(int pages) throws IOException {
+    public static byte[] invoicePdf(int pages) throws IOException {
         return EInvoice.attachXml(plainPdf(pages), sampleXml());
     }
 
@@ -93,11 +94,11 @@ class EInvoiceTest {
             InvoiceXmlGenerator gen = new InvoiceXmlGenerator(System.nanoTime() + i);
             String xml = gen.create();
             try {
-                byte[] pdf = EInvoice.attachXmlStrict(plainPdf(1), xml.getBytes("UTF-8"));
+                byte[] pdf = EInvoice.attachXmlStrict(plainPdf(1), xml.getBytes(StandardCharsets.UTF_8));
                 try (PDDocument doc = Loader.loadPDF(pdf)) {
-                    Assertions.assertArrayEquals(xml.getBytes("UTF-8"), EInvoice.extractXml(doc).orElseThrow());
+                    Assertions.assertArrayEquals(xml.getBytes(StandardCharsets.UTF_8), EInvoice.extractXml(doc).orElseThrow());
                 }
-                Assertions.assertNotNull(EInvoice.summarize(xml.getBytes("UTF-8")).id());
+                Assertions.assertNotNull(EInvoice.summarize(xml.getBytes(StandardCharsets.UTF_8)).id());
             } catch (Exception | AssertionError e) {
                 throw new AssertionError("Seed " + gen.seed() + ": " + e.getMessage() + "\n" + xml, e);
             }
@@ -110,13 +111,13 @@ class EInvoiceTest {
         InvoiceXmlGenerator gen = new InvoiceXmlGenerator(System.nanoTime());
         String broken = gen.create("9930");
         EInvoice.NotConformException e = Assertions.assertThrows(EInvoice.NotConformException.class,
-                () -> EInvoice.attachXmlStrict(plainPdf(1), broken.getBytes("UTF-8")), "Seed " + gen.seed());
+                () -> EInvoice.attachXmlStrict(plainPdf(1), broken.getBytes(StandardCharsets.UTF_8)), "Seed " + gen.seed());
         Assertions.assertTrue(e.getMessage().contains("schemeID"), e.getMessage());
         Assertions.assertFalse(e.getMessage().contains("warning"), e.getMessage());
         Assertions.assertTrue(e.getMessage().length() < 400, e.getMessage());
 
         // an invoice without the legal organization (otherwise generated the same way) is fine
-        Assertions.assertDoesNotThrow(() -> EInvoice.attachXmlStrict(plainPdf(1), new InvoiceXmlGenerator(gen.seed()).create().getBytes("UTF-8")));
+        Assertions.assertDoesNotThrow(() -> EInvoice.attachXmlStrict(plainPdf(1), new InvoiceXmlGenerator(gen.seed()).create().getBytes(StandardCharsets.UTF_8)));
     }
 
     @Test

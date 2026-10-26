@@ -1,5 +1,8 @@
 package com.bw.jPdfTool;
 
+import com.bw.jPdfTool.invoice.EInvoiceTest;
+import com.bw.jPdfTool.invoice.EInvoice;
+
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.junit.jupiter.api.Assertions;

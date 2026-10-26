@@ -1,5 +1,6 @@
 package com.bw.jPdfTool;
 
+import com.bw.jPdfTool.invoice.EInvoice;
 import com.bw.jPdfTool.cli.CommandExecuter;
 import com.bw.jPdfTool.model.MergeOptions;
 import com.bw.jPdfTool.ui.UI;

@@ -1,4 +1,4 @@
-package com.bw.jPdfTool;
+package com.bw.jPdfTool.invoice;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
