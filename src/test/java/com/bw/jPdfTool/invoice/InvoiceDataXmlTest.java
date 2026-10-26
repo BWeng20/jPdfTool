@@ -354,6 +354,27 @@ class InvoiceDataXmlTest {
     }
 
     @Test
+    void replaceXml() throws Exception {
+        InvoiceData d = InvoiceDataTest.sample();
+        InvoiceData other = InvoiceDataTest.sample();
+        other.number = "OTHER-1";
+        other.buyer.name = "Other Buyer";
+        other.lines.remove(1);
+        d.replaceXml(other.toXml());
+        Assertions.assertEquals("OTHER-1", d.number);
+        Assertions.assertEquals("Other Buyer", d.buyer.name);
+        Assertions.assertEquals(1, d.lines.size());
+        Assertions.assertEquals("OTHER-1", InvoiceData.fromXml(d.toXml()).number);
+
+        // An invalid file changes nothing.
+        Assertions.assertThrows(java.io.IOException.class, () -> d.replaceXml("no xml".getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertThrows(java.io.IOException.class,
+                () -> d.replaceXml("<Invoice xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\"/>".getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertEquals("OTHER-1", d.number);
+        Assertions.assertEquals(1, d.lines.size());
+    }
+
+    @Test
     void noCiiIsRejected() {
         Assertions.assertThrows(java.io.IOException.class,
                 () -> InvoiceData.fromXml("<Invoice xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\"/>"

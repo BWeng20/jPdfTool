@@ -1,5 +1,6 @@
 package com.bw.jPdfTool.ui.invoice;
 
+import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.ui.UI;
 import com.bw.jPdfTool.invoice.Party;
 import com.bw.jPdfTool.invoice.InvoiceData;
@@ -77,14 +78,6 @@ import java.util.function.Supplier;
 public class InvoiceEditorDialog extends JDialog {
 
     /**
-     * Attaches the created XML to the document. Called in a background thread.
-     */
-    @FunctionalInterface
-    public interface Attacher {
-        void attach(byte[] xml) throws Exception;
-    }
-
-    /**
      * Common unit codes (UN/ECE Recommendation 20) with readable names.
      */
     static final Map<String, String> UNITS = new LinkedHashMap<>();
@@ -126,7 +119,7 @@ public class InvoiceEditorDialog extends JDialog {
     private static final int COL_TOTAL = 5;
 
     private final InvoiceData data;
-    private final Attacher attacher;
+    private final DocumentProxy proxy;
     private final Locale locale = Locale.getDefault();
     private final DateTimeFormatter dateDisplay = dateFormatter(locale, false);
     private final DateTimeFormatter dateParse = dateFormatter(locale, true);
@@ -143,6 +136,7 @@ public class InvoiceEditorDialog extends JDialog {
     private final JLabel grossValue = amountLabel(true);
     private final JLabel status = new JLabel(" ");
     private final JButton attachButton = new JButton("Attach to Document");
+    private final JButton loadButton = new JButton("Load XML…");
     private final JButton saveButton = new JButton("Save XML…");
     private final JButton cancelButton = new JButton("Cancel");
 
@@ -172,10 +166,10 @@ public class InvoiceEditorDialog extends JDialog {
     }
     private boolean attached;
 
-    private InvoiceEditorDialog(Window owner, InvoiceData data, boolean existing, Attacher attacher) {
+    private InvoiceEditorDialog(Window owner, InvoiceData data, boolean existing, DocumentProxy proxy) {
         super(owner, existing ? "Edit Invoice" : "Create Invoice", Dialog.ModalityType.APPLICATION_MODAL);
         this.data = data;
-        this.attacher = attacher;
+        this.proxy = proxy;
 
         JPanel main = new JPanel(new BorderLayout(0, 10));
         main.setBorder(BorderFactory.createEmptyBorder(12, 12, 10, 12));
@@ -229,10 +223,10 @@ public class InvoiceEditorDialog extends JDialog {
      * Shows the editor (modal).
      *
      * @param xml      The current invoice of the document, null to create a new one.
-     * @param attacher Attaches the result to the document.
+     * @param proxy    The document the result is attached to.
      * @return True if an invoice was attached.
      */
-    public static boolean showDialog(Component parent, byte[] xml, Attacher attacher) {
+    public static boolean showDialog(Component parent, byte[] xml, DocumentProxy proxy) {
         Window owner = parent instanceof Window w ? w : SwingUtilities.getWindowAncestor(parent);
         InvoiceData data = null;
         if (xml != null) {
@@ -254,7 +248,7 @@ public class InvoiceEditorDialog extends JDialog {
             applyDefaultPreset(data);
             data.lines.add(newLine(data));
         }
-        InvoiceEditorDialog dialog = new InvoiceEditorDialog(owner, data, existing, attacher);
+        InvoiceEditorDialog dialog = new InvoiceEditorDialog(owner, data, existing, proxy);
         dialog.setLocationRelativeTo(owner);
         dialog.setVisible(true);
         return dialog.attached;
@@ -816,11 +810,14 @@ public class InvoiceEditorDialog extends JDialog {
 
         attachButton.addActionListener(e -> attach());
         saveButton.setToolTipText("Stores the invoice as XML file, without changing the document.");
+        loadButton.setToolTipText("Replaces the content by an invoice XML file.");
+        loadButton.addActionListener(e -> loadXml());
         saveButton.addActionListener(e -> saveXml());
         cancelButton.addActionListener(e -> cancel());
         getRootPane().setDefaultButton(attachButton);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.TRAILING, 6, 0));
+        buttons.add(loadButton);
         buttons.add(saveButton);
         buttons.add(cancelButton);
         buttons.add(attachButton);
@@ -934,7 +931,7 @@ public class InvoiceEditorDialog extends JDialog {
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws Exception {
-                attacher.attach(xml);
+                proxy.attachInvoice(xml);
                 return null;
             }
 
@@ -953,6 +950,38 @@ public class InvoiceEditorDialog extends JDialog {
                 }
             }
         }.execute();
+    }
+
+    /**
+     * Replaces the content by an invoice XML file. Nothing is changed if the file is no valid invoice.
+     */
+    private void loadXml() {
+        if (working)
+            return;
+        stopEditing();
+        if (dirty && JOptionPane.showConfirmDialog(this, "Replace the current content?", getTitle(),
+                JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE) != JOptionPane.YES_OPTION)
+            return;
+        JFileChooser chooser = new JFileChooser();
+        String lastDir = UI.getPref(Preferences.USER_PREF_LAST_PDF_DIR, null);
+        if (lastDir != null)
+            chooser.setCurrentDirectory(new File(lastDir));
+        chooser.setFileFilter(new FileNameExtensionFilter("XML", "xml"));
+        chooser.setDialogTitle("Load Invoice XML…");
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION)
+            return;
+        byte[] xml;
+        try {
+            xml = Files.readAllBytes(chooser.getSelectedFile().toPath());
+            data.replaceXml(xml);
+        } catch (Exception e) {
+            showError("The file is no valid invoice", e);
+            return;
+        }
+        reloadForm();
+        xmlFields.refresh();
+        dirty = true;
+        update();
     }
 
     private void saveXml() {
@@ -997,6 +1026,7 @@ public class InvoiceEditorDialog extends JDialog {
     private void setWorking(boolean working) {
         this.working = working;
         attachButton.setEnabled(!working);
+        loadButton.setEnabled(!working);
         saveButton.setEnabled(!working);
         cancelButton.setEnabled(!working);
         setCursor(working ? Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR) : null);

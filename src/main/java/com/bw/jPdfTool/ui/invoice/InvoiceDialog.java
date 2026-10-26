@@ -38,6 +38,7 @@ import java.time.format.FormatStyle;
 import java.util.Currency;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Shows the main data of an e-invoice in a readable form, the XML in an expandable text area below.
@@ -390,13 +391,16 @@ public class InvoiceDialog extends JDialog {
         }
     }
 
+    private static final Pattern WHITESPACE = Pattern.compile("\s+");
+    private static final Pattern IBAN_BLOCK = Pattern.compile("(.{4})(?!$)");
+
     /**
      * Groups an IBAN in blocks of four characters.
      */
     static String formatIban(String iban) {
         if (iban == null)
             return null;
-        String compact = iban.replaceAll("\\s+", "");
-        return compact.replaceAll("(.{4})(?!$)", "$1 ");
+        String compact = WHITESPACE.matcher(iban).replaceAll("");
+        return IBAN_BLOCK.matcher(compact).replaceAll("$1 ");
     }
 }

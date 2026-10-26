@@ -1423,8 +1423,7 @@ public class UI extends JSplitPane {
             invoiceError("Failed to read invoice", e);
             return;
         }
-        final DocumentProxy proxy = documentProxy;
-        if (InvoiceEditorDialog.showDialog(this, xml, proxy::attachInvoice))
+        if (InvoiceEditorDialog.showDialog(this, xml, documentProxy))
             toaster.toast(ToastType.SUCCESS, 5000, "<html>%s invoice</html>", xml == null ? "Attached" : "Updated");
     }
 

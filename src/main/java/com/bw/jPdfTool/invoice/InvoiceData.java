@@ -316,7 +316,7 @@ public final class InvoiceData {
     /**
      * The invoice XML with all data.
      */
-    private final Document document;
+    private Document document;
 
     /**
      * Creates an empty invoice.
@@ -518,6 +518,20 @@ public final class InvoiceData {
         InvoiceData d = new InvoiceData(CiiXml.parse(xml));
         d.readFromDocument();
         return d;
+    }
+
+    /**
+     * Replaces the whole content by another invoice XML (CII). This object is not changed if the XML is not valid.
+     *
+     * @throws IOException If the XML can't be read or is no CII invoice.
+     */
+    public void replaceXml(byte[] xml) throws IOException {
+        Document parsed = CiiXml.parse(xml);
+        InvoiceData probe = new InvoiceData(parsed);
+        // Reading is the real test: it must work before anything of this object is replaced.
+        probe.readFromDocument();
+        document = parsed;
+        readFromDocument();
     }
 
     // ---------------------------------------------------------------- write
