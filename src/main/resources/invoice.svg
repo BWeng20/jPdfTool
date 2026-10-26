@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg viewBox="0 0 32 32" width="56" height="56" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"
+          d="M 5,1 H 22 L 27,6 V 31 H 5 Z M 22,1 V 6 H 27"/>
+    <text x="15.5" y="11.5" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="4.5"
+          fill="currentColor" stroke="none">Invoice</text>
+    <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"
+          d="M 8.5,15.5 H 23.5 M 8.5,19 H 23.5 M 8.5,22.5 H 15"/>
+    <path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"
+          d="M 24.6,22.6 A 3.2,3.2 0 1 0 24.6,27.4 M 17.9,24.3 H 22.6 M 17.9,25.9 H 22.6"/>
+</svg>

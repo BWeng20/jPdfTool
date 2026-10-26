@@ -58,12 +58,46 @@ Some PDF tools seems to split images into fragments - this tool can provide a me
 
 This effectively removes any hidden objects if you e.g. tried to redact documents but hidden text- or image-objects are still in the document. +
 
-=== Redact Text and Areas (CLI)
+=== Redact Text and Areas
 
-Permanently removes text matching a regular expression (`--redactText`) or rectangular areas (`--redactArea`). +
-Affected pages are rendered to an image, the areas are painted black and the page is replaced by that image, so the redacted content (and any other text on that page) is really gone and not just covered. +
-Areas are given in points (1/72 inch) from the upper left corner of the page: `--redactArea 1:50,100,200,20`. +
-Both options can be repeated. Annotations (links, form fields) on redacted pages are dropped.
+Permanently removes text matching a regular expression or rectangular areas. +
+In the UI, open the redaction dialog of a page, mark areas with the mouse or search for text. The help button of the dialog explains the details. +
+In the CLI, use `--redactText <regex>` and `--redactArea <page>:<x>,<y>,<width>,<height>`. Areas are given in points (1/72 inch) from the upper left corner of the page: `--redactArea 1:50,100,200,20`. Both options can be repeated.
+
+How it works: affected pages are rendered to an image, the areas are painted (black by default) and the page is replaced by that image. So the redacted content (and any other text on that page) is really gone and not just covered. Pages without redacted areas are not changed.
+
+On redacted pages, text can't be selected or searched anymore, and annotations (links, comments, form fields) are dropped.
+
+[IMPORTANT]
+====
+Redaction only cleans the *content of the pages*. The following is *not* removed, check it yourself before you share a redacted document:
+
+* Bookmarks (outline), document information (title, author, ...) and XMP metadata.
+* Attached files. An e-invoice is detected: the UI asks what to do, the CLI refuses unless `--removeInvoice` is given (see below).
+* Values of form fields, they are stored outside the pages.
+
+Text search only finds real text, not text inside images (e.g. scanned pages). Mark such areas by hand.
+====
+
+=== E-Invoices (ZUGFeRD / Factur-X)
+
+Handles hybrid e-invoices: a PDF that carries the invoice as CII XML attachment (`factur-x.xml`, `ZUGFeRD-invoice.xml` or `xrechnung.xml`). +
+Pure XML invoices (XRechnung) are not supported. Based on the https://www.mustangproject.org[Mustang] library.
+
+* The UI menu *Invoice* shows the invoice data, validates the document (PDF/A-3 and EN 16931 rules), saves the XML, attaches an XML or removes the invoice.
+* CLI: `--extractInvoice <xml file>`, `--attachInvoice <xml file>`, `--removeInvoice` and `--validateInvoice` (validates the resulting file).
+* Merging keeps the invoice. If both documents contain an invoice, only the one of the first document is kept.
+* Splitting keeps the invoice in the *first* part only, as a part is not the complete invoice any more.
+* Redaction doesn't touch the invoice data, so confidential data may remain in the XML. The UI asks what to do, the CLI refuses to redact such a document unless `--removeInvoice` is given.
+* Attaching an XML fails with an error (CLI exit code 13) if the result is not a conform PDF/A-3 / EN 16931 document, e.g. because the PDF uses fonts that are not embedded. The document is not changed then. Converting arbitrary PDFs to PDF/A-3 is not supported.
+* Encryption is not allowed for PDF/A-3. An encrypted document is no valid e-invoice any more. The CLI only encrypts if a password is given and logs a warning then.
+* The UI has the option *PDF/A-3* beside the page count. It disables everything that would violate the standard: passwords, permissions and encryption, splitting, appending documents that are no PDF/A, and converting pages to images (including redaction) if the document has a non-RGB output intent (e.g. CMYK). A document without output intent gets an sRGB output intent (the profile Mustang also uses for e-invoices), so its pages can be converted to images. It is set automatically when a PDF/A-3 document or an e-invoice is opened, or when an invoice is added (attached or by appending a document), and can be changed. Without it, the passwords are used as entered; saving an e-invoice with encryption shows a warning.
+* The document information (title, author, ...) is also written to the XMP metadata, as PDF/A requires both to be equal.
+
+=== Remember Passwords
+
+The option *Remember Passwords* stores the owner, user and signature passwords in the user preferences. +
+*Note:* The passwords are stored *unencrypted* (on Windows in the registry, on Linux/macOS in a file in your home directory). Every program running under your account can read them. Don't use this option on shared computers.
 
 === Load Protected PDFs
 
@@ -111,7 +145,8 @@ java -cp "$(printf %s: lib/*.jar)" com.bw.jPdfTool.Main
 
 This command simply adds all JARs in the lib folder to the classpath.
 The main class is `com.bw.jPdfTool.Main`.
-Calling it without any arguments will launch the *Graphical User Interface (GUI)*.
+Calling it without any arguments will launch the *Graphical User Interface (GUI)*. +
+Calling it with only file names (no options) opens these files in the GUI, e.g. `jPdfTool.exe a.pdf b.pdf` loads `a.pdf` and appends `b.pdf`.
 
 == Command Line Interface (CLI)
 
@@ -130,6 +165,31 @@ To show the usage information of the CLI, use:
 ----
 java -cp "$(printf %s: lib/*.jar)" com.bw.jPdfTool.Main -h
 ----
+
+Add `--debug` to see debug output and stack traces. It also works together with file names to start the UI in debug mode (for the UI or the exe you can also set the system property `jpdftool.debug=true`).
+
+=== Exit Codes
+
+[cols="1,6"]
+|===
+|Code |Meaning
+
+|0  |Success.
+|1  |Unexpected error, see the error output (use `--debug` for the stack trace).
+|2  |No input files given, or invalid command line arguments.
+|3  |No output file (`--out`) given.
+|4  |Malformed `--merge` argument (not `<start>-<amount>-<skip>`).
+|5  |Illegal number in the `--merge` argument.
+|6  |Malformed `--redactText` or `--redactArea` argument.
+|7  |`--validateInvoice` combined with `--split`.
+|8  |`--extractInvoice` given, but the document contains no invoice.
+|9  |Redaction requested for a document with an invoice, but no `--removeInvoice` given.
+|10 |The invoice XML (`--attachInvoice`) or the certificate (`--certificate`) doesn't exist.
+|11 |The validation of the result failed to run.
+|12 |The result is no valid invoice (`--validateInvoice`).
+|13 |The attached invoice would not be a conform PDF/A-3 / EN 16931 document. The document is not changed.
+|14 |An input file can't be loaded (e.g. wrong or missing password, broken file) or merged. No output is written.
+|===
 
 *Note:* The CLI currently supports only a subset of the tool's total functionality. +
 Feel free to ask in case you need special functionality.

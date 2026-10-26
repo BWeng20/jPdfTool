@@ -1,9 +1,13 @@
 package com.bw.jPdfTool.ui;
 
+import com.bw.jPdfTool.DocumentInformation;
+import com.bw.jPdfTool.EInvoice;
 import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.PdfStandard;
 import com.bw.jPdfTool.Main;
 import com.bw.jPdfTool.Preferences;
 import com.bw.jPdfTool.Redactor;
+import com.bw.jPdfTool.SafeFile;
 import com.bw.jPdfTool.SignatureTool;
 import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.model.MergeOptions;
@@ -29,6 +33,8 @@ import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import javax.swing.event.MenuEvent;
+import javax.swing.event.MenuListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
@@ -40,19 +46,16 @@ import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.MouseAdapter;
-import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
@@ -95,6 +98,24 @@ public class UI extends JSplitPane {
     private PageWidget selectedPage;
 
     private final JTextField pageCount = new JTextField(4);
+    private final JLabel pdfStandard = new JLabel() {
+        @Override
+        public void updateUI() {
+            super.updateUI();
+            // Gray like other hints. Set here, so it follows a change of the look and feel.
+            setForeground(UIManager.getColor("Label.disabledForeground"));
+        }
+    };
+    private final JCheckBox pdfA3 = new JCheckBox("PDF/A-3");
+    private final JButton generateOwner = new JButton("<html><body>Generate<br>Owner Password</body></html>");
+    /**
+     * Set for a new main document: the PDF/A-3 option is set from the first loaded document.
+     */
+    private boolean pdfaFromDocument;
+    /**
+     * If the effective document contained an invoice at the last update. Adding one turns on PDF/A-3.
+     */
+    private boolean hadInvoice;
     private final JCheckBox useDocumentInformation = new JCheckBox("Use Information from first loaded Document");
     private final JButton clearInformation = new JButton("Clear Information");
     private final JTextField title = new JTextField(15);
@@ -432,7 +453,6 @@ public class UI extends JSplitPane {
                         "<b>Reminder:</b> The <i>Annotations</i> permission covers forms, comments, and signing.</font></html>",
                 "Help", JOptionPane.INFORMATION_MESSAGE));
 
-        JButton generateOwner = new JButton("<html><body>Generate<br>Owner Password</body></html>");
         compression.setSelected(true);
         allowPrinting.setSelected(true);
         saveButton.setEnabled(false);
@@ -587,7 +607,26 @@ public class UI extends JSplitPane {
 
         gc.gridx = 1;
         gc.weightx = 1;
-        documentPanel.add(pageCount, gc);
+        pdfStandard.setFont(hintFont);
+        pdfStandard.setToolTipText("<html>PDF version and the standards the document declares in its metadata<br>"
+                + "(PDF/A, PDF/X, PDF/UA, e-invoice). This is not a validation.</html>");
+        JPanel pageCountRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        pageCountRow.setOpaque(false);
+        pageCountRow.add(pageCount);
+        pageCountRow.add(Box.createHorizontalStrut(10));
+        pdfA3.setOpaque(false);
+        pdfA3.setToolTipText("<html>Keeps the document PDF/A-3 conform, as required for e-invoices (ZUGFeRD/Factur-X).<br>"
+                + "Everything that would violate the standard is disabled: passwords, permissions and<br>"
+                + "encryption, splitting, appending documents that are no PDF/A, and converting pages<br>"
+                + "to images if the document has a non-RGB output intent.<br>"
+                + "A document without output intent gets an sRGB output intent.<br>"
+                + "The loaded document must already be PDF/A-3, converting is not supported.<br>"
+                + "Set automatically when a PDF/A-3 document or an e-invoice is opened, or an invoice is added.</html>");
+        pdfA3.addItemListener(e -> updatePdfAState());
+        pageCountRow.add(pdfA3);
+        pageCountRow.add(Box.createHorizontalStrut(10));
+        pageCountRow.add(pdfStandard);
+        documentPanel.add(pageCountRow, gc);
 
         gc.gridy++;
         gc.gridx = 0;
@@ -761,8 +800,10 @@ public class UI extends JSplitPane {
         renderAllToImageButton.setEnabled(false);
         renderAllToImageButton.setOpaque(false);
         renderAllToImageButton.setToolTipText("Replace all pages with the rendered images.");
-        renderAllToImageButton.addActionListener(e ->
-                runInBusy(this::doRenderAllToImage));
+        renderAllToImageButton.addActionListener(e -> {
+            if (imagesAllowed())
+                runInBusy(this::doRenderAllToImage);
+        });
 
         redactButton.setOpaque(false);
         redactButton.setEnabled(false);
@@ -975,8 +1016,11 @@ public class UI extends JSplitPane {
             lafGroup.add(lafSystem);
 
             storePasswords.setToolTipText(
-                    "<html>Stores the owner password in user preferences.<br>" +
-                            "Otherwise the owner password is generated randomly on each start." +
+                    "<html>Stores the owner, user and signature passwords in the user preferences.<br>" +
+                            "Otherwise the owner password is generated randomly on each start.<br><br>" +
+                            "<b>Note:</b> The passwords are stored <b>unencrypted</b> (on Windows in the registry,<br>" +
+                            "on Linux/macOS in a file in your home directory). Every program running<br>" +
+                            "under your account can read them. Don't use this on shared computers." +
                             "</html>");
             storePasswords.addActionListener(e -> {
                 boolean sop = storePasswords.isSelected();
@@ -1019,7 +1063,7 @@ public class UI extends JSplitPane {
                 }
             }
 
-            JMenuItem redactionColor = new JMenuItem("Redaction Color...");
+            JMenuItem redactionColor = new JMenuItem("Redaction Color");
             redactionColor.addActionListener(e -> RedactionDialog.chooseColor(this));
 
             JMenu options = new JMenu("Options");
@@ -1029,7 +1073,7 @@ public class UI extends JSplitPane {
             options.add(renderQuality);
             options.add(redactionColor);
 
-            if (Log.DEBUG) {
+            if (Log.isDebug()) {
                 JMenu viewerQuality = new JMenu("Viewer Quality (debug mode)");
 
                 viewerQuality.add(viewQualityAA);
@@ -1052,6 +1096,7 @@ public class UI extends JSplitPane {
                 options.add(viewerQuality);
             }
             menuBar.add(options);
+            menuBar.add(createInvoiceMenu());
         }
 
         LookAndFeel currentLaf = UIManager.getLookAndFeel();
@@ -1077,7 +1122,7 @@ public class UI extends JSplitPane {
 
     protected void doBrowseSignatureFile() {
         JFileChooser chooser = getSignatureChooser();
-        chooser.setDialogTitle("Select Signature to use...");
+        chooser.setDialogTitle("Select Signature to use…");
         int result = chooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
             File selectedFile = chooser.getSelectedFile();
@@ -1090,7 +1135,7 @@ public class UI extends JSplitPane {
      */
     protected void doBrowsePdf() {
         JFileChooser chooser = getPdfChooser();
-        chooser.setDialogTitle("Select PDF(s) to Load...");
+        chooser.setDialogTitle("Select PDF(s) to Load…");
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setMultiSelectionEnabled(true);
         int result = chooser.showOpenDialog(this);
@@ -1112,7 +1157,7 @@ public class UI extends JSplitPane {
      */
     protected void doBrowseAdditionalPdf() {
         JFileChooser chooser = getPdfChooser();
-        chooser.setDialogTitle("Select PDF(s) to Append...");
+        chooser.setDialogTitle("Select PDF(s) to Append…");
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setMultiSelectionEnabled(true);
         try {
@@ -1193,7 +1238,7 @@ public class UI extends JSplitPane {
      */
     protected void doRenderToImage() {
         PageWidget pw = pages.getSelectedPage();
-        if (pw != null) {
+        if (pw != null && imagesAllowed()) {
             Page page = pw.getPage();
             page.document.renderPageToImage(page.pageNb);
             toaster.toast(ToastType.SUCCESS, 5000, "<html>Converted to %d dpi image</html>",
@@ -1206,10 +1251,27 @@ public class UI extends JSplitPane {
      */
     protected void doRedact() {
         PageWidget pw = pages.getSelectedPage();
-        if (pw != null && documentProxy != null && documentProxy.getDocument() != null) {
+        if (pw != null && documentProxy != null && documentProxy.getDocument() != null && imagesAllowed()) {
             Page page = pw.getPage();
             List<Redactor.Region> regions = RedactionDialog.showDialog(
                     SwingUtilities.getWindowAncestor(this), documentProxy.getDocument(), page.pageNb);
+            if (regions != null && EInvoice.hasInvoice(documentProxy.getDocument())) {
+                int choice = JOptionPane.showOptionDialog(this,
+                        "<html>The document contains an invoice (ZUGFeRD/Factur-X).<br>"
+                                + "Redaction doesn't touch its data, so confidential data may remain in the invoice.</html>",
+                        "Invoice", JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE, null,
+                        new Object[]{"Remove Invoice", "Keep Invoice", "Cancel"}, "Remove Invoice");
+                if (choice == 0) {
+                    try {
+                        documentProxy.removeInvoice();
+                    } catch (IOException e) {
+                        invoiceError("Failed to remove invoice", e);
+                        return;
+                    }
+                } else if (choice != 1) {
+                    return;
+                }
+            }
             if (regions != null) {
                 runInBusy(() -> {
                     try {
@@ -1225,6 +1287,183 @@ public class UI extends JSplitPane {
         }
     }
 
+    private static final String ATTACH_INVOICE = "Attach Invoice XML…";
+    private static final String ATTACH_INVOICE_TOOLTIP =
+            "Attaches a ZUGFeRD/Factur-X (CII) XML. An existing invoice is replaced.";
+
+    /**
+     * Creates the menu with the e-invoice (ZUGFeRD/Factur-X) actions.
+     */
+    private JMenu createInvoiceMenu() {
+        JMenu menu = new JMenu("Invoice");
+
+        JMenuItem show = new JMenuItem("Show Invoice…");
+        show.addActionListener(e -> doShowInvoice());
+        JMenuItem validate = new JMenuItem("Validate…");
+        validate.setToolTipText("Checks PDF/A-3 and the EN 16931 rules of the current document.");
+        validate.addActionListener(e -> doValidateInvoice());
+        JMenuItem save = new JMenuItem("Save Invoice XML…");
+        save.addActionListener(e -> doSaveInvoiceXml());
+        JMenuItem attach = new JMenuItem(ATTACH_INVOICE);
+        attach.setToolTipText(ATTACH_INVOICE_TOOLTIP);
+        attach.addActionListener(e -> doAttachInvoiceXml());
+        JMenuItem remove = new JMenuItem("Remove Invoice");
+        remove.addActionListener(e -> doRemoveInvoice());
+
+        menu.add(show);
+        menu.add(validate);
+        menu.addSeparator();
+        menu.add(save);
+        menu.add(attach);
+        menu.add(remove);
+
+        menu.addMenuListener(new MenuListener() {
+            @Override
+            public void menuSelected(MenuEvent e) {
+                boolean hasDocument = documentProxy != null && documentProxy.getDocument() != null;
+                boolean hasInvoice = hasDocument && EInvoice.hasInvoice(documentProxy.getDocument());
+                show.setEnabled(hasInvoice);
+                save.setEnabled(hasInvoice);
+                remove.setEnabled(hasInvoice);
+                validate.setEnabled(hasDocument);
+
+                boolean supported = hasDocument && EInvoice.supportsInvoice(documentProxy.getDocument());
+                attach.setEnabled(supported);
+                if (hasDocument && !supported) {
+                    attach.setText(ATTACH_INVOICE + " (not for PDF 2.0)");
+                    attach.setToolTipText("<html>E-invoices need PDF/A-3, which is based on PDF 1.7.<br>"
+                            + "A PDF 2.0 document can't be conform.</html>");
+                } else {
+                    attach.setText(ATTACH_INVOICE);
+                    attach.setToolTipText(ATTACH_INVOICE_TOOLTIP);
+                }
+            }
+
+            @Override
+            public void menuDeselected(MenuEvent e) {
+            }
+
+            @Override
+            public void menuCanceled(MenuEvent e) {
+            }
+        });
+        return menu;
+    }
+
+    private void showText(String title, String text) {
+        JTextArea area = new JTextArea(text, 24, 90);
+        area.setEditable(false);
+        area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, area.getFont().getSize()));
+        area.setCaretPosition(0);
+        JOptionPane.showMessageDialog(this, new JScrollPane(area), title, JOptionPane.PLAIN_MESSAGE);
+    }
+
+    /**
+     * Reports an error. Long or multi-line messages (e.g. validation results) don't fit into a toast,
+     * they are shown in a dialog.
+     */
+    private void invoiceError(String what, Exception e) {
+        Log.exception(e);
+        String message = e.getMessage() == null ? e.toString() : e.getMessage();
+        if (message.length() > 80 || message.indexOf('\n') >= 0) {
+            toaster.toast(ToastType.ERROR, 10000,
+                    "<html><font size='+2'>%s</font><br><font size='+1'><i>See the details dialog</i></font></html>", what);
+            SwingUtilities.invokeLater(() -> showText(what, message));
+        } else {
+            toaster.toast(ToastType.ERROR, 20000,
+                    "<html><font size='+2'>%s</font><br><font size='+1'><i>%s</i></font></html>", what, message);
+        }
+    }
+
+    protected void doShowInvoice() {
+        if (documentProxy == null || documentProxy.getDocument() == null)
+            return;
+        try {
+            var xml = EInvoice.extractXml(documentProxy.getDocument());
+            if (xml.isEmpty()) {
+                toaster.toast(ToastType.INFO, 5000, "<html>The document contains no invoice</html>");
+                return;
+            }
+            InvoiceDialog.showDialog(this, xml.get());
+        } catch (IOException e) {
+            invoiceError("Failed to read invoice", e);
+        }
+    }
+
+    protected void doValidateInvoice() {
+        if (documentProxy == null || documentProxy.getDocument() == null)
+            return;
+        runInBusy(() -> {
+            try {
+                EInvoice.Validation v = EInvoice.validate(documentProxy.getBytes(), "current document");
+                SwingUtilities.invokeLater(() -> ValidationDialog.showDialog(this, v));
+            } catch (Exception e) {
+                invoiceError("Validation failed", e);
+            }
+        });
+    }
+
+    private File chooseXml(boolean save) {
+        JFileChooser chooser = new JFileChooser();
+        String lastDir = getPref(Preferences.USER_PREF_LAST_PDF_DIR, null);
+        if (lastDir != null)
+            chooser.setCurrentDirectory(new File(lastDir));
+        chooser.setFileFilter(new FileNameExtensionFilter("XML", "xml"));
+        chooser.setMultiSelectionEnabled(false);
+        if (save) {
+            chooser.setDialogTitle("Save Invoice XML…");
+            chooser.setSelectedFile(new File(chooser.getCurrentDirectory(), "factur-x.xml"));
+        } else {
+            chooser.setDialogTitle("Select Invoice XML…");
+        }
+        int result = save ? chooser.showSaveDialog(this) : chooser.showOpenDialog(this);
+        return result == JFileChooser.APPROVE_OPTION ? chooser.getSelectedFile() : null;
+    }
+
+    protected void doSaveInvoiceXml() {
+        if (documentProxy == null || documentProxy.getDocument() == null)
+            return;
+        try {
+            var xml = EInvoice.extractXml(documentProxy.getDocument());
+            if (xml.isEmpty())
+                return;
+            File file = chooseXml(true);
+            if (file != null && (!file.exists() || askOverwrite(this, file.toPath()))) {
+                Files.write(file.toPath(), xml.get());
+                toaster.toast(ToastType.SUCCESS, 5000, "<html>Stored invoice to<br><i>%s</i></html>", file.getName());
+            }
+        } catch (IOException e) {
+            invoiceError("Failed to store invoice", e);
+        }
+    }
+
+    protected void doAttachInvoiceXml() {
+        if (documentProxy == null || documentProxy.getDocument() == null)
+            return;
+        File file = chooseXml(false);
+        if (file != null) {
+            runInBusy(() -> {
+                try {
+                    documentProxy.attachInvoice(Files.readAllBytes(file.toPath()));
+                    toaster.toast(ToastType.SUCCESS, 5000, "<html>Attached invoice<br><i>%s</i></html>", file.getName());
+                } catch (Exception e) {
+                    invoiceError("Failed to attach invoice", e);
+                }
+            });
+        }
+    }
+
+    protected void doRemoveInvoice() {
+        if (documentProxy == null || documentProxy.getDocument() == null)
+            return;
+        try {
+            if (documentProxy.removeInvoice())
+                toaster.toast(ToastType.SUCCESS, 5000, "<html>Removed invoice</html>");
+        } catch (IOException e) {
+            invoiceError("Failed to remove invoice", e);
+        }
+    }
+
     /**
      * Renders all pages as images.
      */
@@ -1237,6 +1476,28 @@ public class UI extends JSplitPane {
     }
 
     /**
+     * Gets the passwords for saving.<br>
+     * With the PDF/A-3 option, the password fields are disabled and nothing is encrypted. Otherwise the passwords
+     * are used as entered. If that makes an e-invoice invalid, a warning is shown.
+     *
+     * @return {owner password, user password}, empty strings for no encryption. Null if saving shall be cancelled.
+     */
+    protected String[] passwordsForSave() {
+        if (pdfA3.isSelected())
+            return new String[]{"", ""};
+        String ownerPwd = ownerPasswordField.getText().trim();
+        String userPwd = userPasswordField.getText().trim();
+        PDDocument document = documentProxy == null ? null : documentProxy.getDocument();
+        if ((!ownerPwd.isEmpty() || !userPwd.isEmpty()) && document != null && EInvoice.hasInvoice(document)) {
+            toaster.toast(ToastType.WARNING, 15000,
+                    "<html><font size='+1'><b>Encrypted e-invoice</b></font><br>The document contains an e-invoice, "
+                            + "but is saved with encryption.<br>It is no valid e-invoice then. "
+                            + "Check <i>PDF/A-3</i> to save it without.</html>");
+        }
+        return new String[]{ownerPwd, userPwd};
+    }
+
+    /**
      * Requests a file template and creates multiple documents.
      */
     protected void doSplit() {
@@ -1244,8 +1505,11 @@ public class UI extends JSplitPane {
             int pagePerDocument = number.intValue();
             if (pagePerDocument > 0 && documentProxy != null) {
 
-                String ownerPwd = ownerPasswordField.getText().trim();
-                String userPwd = userPasswordField.getText().trim();
+                String[] passwords = passwordsForSave();
+                if (passwords == null)
+                    return;
+                String ownerPwd = passwords[0];
+                String userPwd = passwords[1];
 
                 JFileChooser chooser = getSavePdfChooser();
                 chooser.setMultiSelectionEnabled(false);
@@ -1273,10 +1537,16 @@ public class UI extends JSplitPane {
                     int fileCount = 0;
                     try {
                         final PDDocument source = documentProxy.getCopy();
+                        final byte[] invoiceXml = EInvoice.extractXml(source).orElse(null);
                         Splitter splitter = new Splitter();
                         splitter.setSplitAtPage(pagePerDocument);
                         List<PDDocument> splittedDocs = splitter.split(source);
-                        for (PDDocument doc : splittedDocs) {
+                        for (PDDocument part : splittedDocs) {
+                            PDDocument doc = part;
+                            if (invoiceXml != null && fileCount == 0) {
+                                Log.error("The document contains an invoice. It is only kept in the first of the split documents.");
+                                doc = EInvoice.attach(doc, invoiceXml);
+                            }
                             String docFile = String.format("%s%03d%s", fprefix, ++fileCount, fpostfix);
                             saveDocument(doc, Paths.get(docFile), ownerPwd, userPwd);
                             Log.info("Stored file '%s'", docFile);
@@ -1378,8 +1648,11 @@ public class UI extends JSplitPane {
                         return;
                     }
 
-                    String ownerPwd = ownerPasswordField.getText().trim();
-                    String userPwd = userPasswordField.getText().trim();
+                    String[] passwords = passwordsForSave();
+                    if (passwords == null)
+                        return;
+                    String ownerPwd = passwords[0];
+                    String userPwd = passwords[1];
 
                     saveDocument(documentProxy.getCopy(), selectedFilePath, ownerPwd, userPwd);
 
@@ -1442,10 +1715,13 @@ public class UI extends JSplitPane {
     protected void saveDocument(PDDocument document, Path file, String ownerPwd, String userPwd) throws IOException {
         try {
 
+            document = EInvoice.repair(document);
             setDocumentInformation(document);
             final boolean doSign = this.sign.isSelected();
 
             if ((!ownerPwd.isEmpty()) || (!userPwd.isEmpty())) {
+                if (EInvoice.hasInvoice(document))
+                    Log.error("The document contains an invoice. Encryption is not allowed for PDF/A-3, so it is no valid ZUGFeRD/Factur-X document any more.");
                 AccessPermission ap = new AccessPermission();
                 ap.setCanPrint(allowPrinting.isSelected());
                 ap.setCanModify(allowModification.isSelected());
@@ -1470,15 +1746,16 @@ public class UI extends JSplitPane {
                 }
             }
 
-            try (OutputStream os = new BufferedOutputStream(Files.newOutputStream(file))) {
-                if (doSign) {
-                    if (!sign(document))
-                        return;
-                    document.saveIncremental(os);
-                } else {
-                    document.save(os);
-                }
-            }
+            // Signing happens while saving, if it fails, an existing file must stay as it is.
+            final PDDocument toSave = document;
+            if (doSign)
+                sign(toSave);
+            SafeFile.write(file, os -> {
+                if (doSign)
+                    toSave.saveIncremental(os);
+                else
+                    toSave.save(os);
+            });
         } finally {
             if (document != null)
                 document.close();
@@ -1486,7 +1763,12 @@ public class UI extends JSplitPane {
 
     }
 
-    protected boolean sign(PDDocument document) {
+    /**
+     * Prepares the signature, it is created by the next incremental save.
+     *
+     * @throws IOException If the key can't be used.
+     */
+    protected void sign(PDDocument document) throws IOException {
         char[] pw = signaturePasswordField.getPassword();
         try {
             SignatureTool createSignature = new SignatureTool();
@@ -1495,17 +1777,11 @@ public class UI extends JSplitPane {
                 String alias = createSignature.addKey(is, pw);
                 createSignature.addSignature(document, alias, pw);
             }
-            Preferences pref = Preferences.getInstance();
-            pref.set(Preferences.USER_PREF_SIG_PASSWORD, new String(pw));
-            return true;
         } catch (Exception ex) {
-            Log.exception(ex);
-            toaster.toast(ToastType.ERROR, 20000,
-                    "<html><font size='+2'>Error</font><br><font size='+1'><i>%s</i></font></html>", ex.getMessage());
-            return false;
+            throw new IOException("Signing failed: " + ex.getMessage(), ex);
         }
-
-
+        Preferences pref = Preferences.getInstance();
+        pref.set(Preferences.USER_PREF_SIG_PASSWORD, new String(pw));
     }
 
     public static boolean askOverwrite(Component comp, Path file) {
@@ -1626,6 +1902,16 @@ public class UI extends JSplitPane {
         }
     }
 
+    /**
+     * Runs the code on the event dispatch thread: directly if already there, otherwise later.
+     */
+    private static void runOnEdt(Runnable r) {
+        if (SwingUtilities.isEventDispatchThread())
+            r.run();
+        else
+            SwingUtilities.invokeLater(r);
+    }
+
     public void runInBusy(final Runnable r) {
         setBusy(true);
         new SwingWorker<>() {
@@ -1661,6 +1947,16 @@ public class UI extends JSplitPane {
 
         if (selectedFile != null) {
             documentProxy = new DocumentProxy(renderQueue);
+            pdfaFromDocument = true;
+            hadInvoice = false;
+            documentProxy.appendCheck = doc -> {
+                if (!pdfA3.isSelected() || PdfStandard.pdfaPart(doc) > 0)
+                    return null;
+                toaster.toast(ToastType.ERROR, 10000,
+                        "<html><font size='+1'><b>Not appended</b></font><br>The document is no PDF/A document.<br>"
+                                + "Uncheck <i>PDF/A-3</i> to append it anyway.</html>");
+                return "Not appended: the document is no PDF/A document.";
+            };
             documentProxy.addDocumentConsumer(new DocumentProxy.DocumentConsumer() {
 
                 @Override
@@ -1671,8 +1967,21 @@ public class UI extends JSplitPane {
                     renderAllToImageButton.setEnabled(true);
                     rotateAllClockwiseButton.setEnabled(true);
                     saveButton.setEnabled(true);
-                    splitDocument.setEnabled(true);
                     browseAppendButton.setEnabled(true);
+                    final boolean hasInvoice = EInvoice.hasInvoice(document);
+                    final int pdfaPart = PdfStandard.pdfaPart(document);
+                    // May be called from background tasks (e.g. attaching an invoice).
+                    runOnEdt(() -> {
+                        if (pdfaFromDocument) {
+                            pdfaFromDocument = false;
+                            pdfA3.setSelected(pdfaPart == 3 || hasInvoice);
+                        } else if (hasInvoice && !hadInvoice) {
+                            // An invoice was added (attached or by appending a document): e-invoices need PDF/A-3.
+                            pdfA3.setSelected(true);
+                        }
+                        hadInvoice = hasInvoice;
+                        updatePdfAState();
+                    });
 
                     initDocumentInformation();
 
@@ -1712,22 +2021,14 @@ public class UI extends JSplitPane {
         }
     }
 
+    /**
+     * Writes the document information from the UI fields. The XMP metadata is kept and updated,
+     * removing it would break PDF/A documents and e-invoices.
+     */
     protected void setDocumentInformation(PDDocument pdDocument) {
-        PDDocumentInformation info = new PDDocumentInformation();
-
-        info.setCreationDate(Calendar.getInstance());
-        info.setModificationDate(Calendar.getInstance());
-
-        // TODO: Possibly outdated for PDF Version 2
-        info.setTitle(title.getText());
-        info.setAuthor(author.getText());
-        info.setCreator(creator.getText());
-        info.setProducer(producer.getText());
-        info.setSubject(subject.getText());
-        info.setKeywords(keywords.getText());
-
-        pdDocument.setDocumentInformation(info);
-        pdDocument.getDocumentCatalog().setMetadata(null);
+        DocumentInformation.apply(pdDocument, new DocumentInformation.Values(
+                title.getText(), author.getText(), subject.getText(), keywords.getText(),
+                creator.getText(), producer.getText()));
     }
 
     protected void initDocumentInformation() {
@@ -1736,6 +2037,8 @@ public class UI extends JSplitPane {
         final PDDocument document = documentProxy == null ? null : documentProxy.getDocument();
         if (document != null) {
             pageCount.setText(String.format("%d", documentProxy.getPageCount()));
+            final String standard = PdfStandard.describe(document);
+            SwingUtilities.invokeLater(() -> pdfStandard.setText(standard));
 
             if (useDoc) {
                 PDDocumentInformation info = document.getDocumentInformation();
@@ -1755,6 +2058,7 @@ public class UI extends JSplitPane {
             }
         } else {
             pageCount.setText("");
+            pdfStandard.setText("");
             if (useDoc) {
                 title.setText("");
                 author.setText("");
@@ -1776,8 +2080,55 @@ public class UI extends JSplitPane {
     }
 
 
+    /**
+     * Enables or disables everything that would violate PDF/A-3, see {@link #pdfA3}.
+     */
+    protected void updatePdfAState() {
+        final boolean pdfa = pdfA3.isSelected();
+        final String notAllowed = "Not allowed for PDF/A-3 (see the option beside the page count).";
+
+        ownerPasswordField.setEnabled(!pdfa);
+        userPasswordField.setEnabled(!pdfa);
+        generateOwner.setEnabled(!pdfa);
+        for (JRadioButtonMenuItem item : new JRadioButtonMenuItem[]{encryptionKeyLength40, encryptionKeyLength128, encryptionKeyLength256})
+            item.setEnabled(!pdfa);
+        ownerPasswordField.setToolTipText(pdfa ? notAllowed : null);
+        userPasswordField.setToolTipText(pdfa ? notAllowed : null);
+
+        boolean hasDocument = documentProxy != null && documentProxy.getDocument() != null;
+        if (pdfa && hasDocument) {
+            // PDF/A needs an RGB output intent for the images of "To Image" and redaction.
+            try {
+                if (PdfStandard.addSrgbOutputIntent(documentProxy.getDocument()))
+                    Log.info("Added sRGB output intent for PDF/A-3.");
+            } catch (IOException e) {
+                Log.error("Failed to add sRGB output intent: %s", e.getMessage());
+            }
+        }
+        splitDocument.setEnabled(hasDocument && !pdfa);
+        splitDocument.setToolTipText(pdfa ? "<html>Not allowed for PDF/A-3: the parts lose the PDF/A metadata.</html>" : null);
+
+        updatePermissions();
+    }
+
+    /**
+     * Checks if pages may be converted to images. The images use device RGB colors, which PDF/A
+     * allows only with an RGB output intent.
+     *
+     * @return True if allowed, otherwise the reason is shown.
+     */
+    protected boolean imagesAllowed() {
+        PDDocument document = documentProxy == null ? null : documentProxy.getDocument();
+        if (!pdfA3.isSelected() || document == null || PdfStandard.hasRgbOutputIntent(document))
+            return true;
+        toaster.toast(ToastType.ERROR, 10000,
+                "<html><font size='+1'><b>Not possible with PDF/A-3</b></font><br>The images use RGB colors, "
+                        + "but the document has a non-RGB output intent (e.g. CMYK).<br>Uncheck <i>PDF/A-3</i> to do it anyway.</html>");
+        return false;
+    }
+
     protected void updatePermissions() {
-        boolean rightsPossible = !ownerPasswordField.getText().trim().isEmpty();
+        boolean rightsPossible = !pdfA3.isSelected() && !ownerPasswordField.getText().trim().isEmpty();
         allowPrinting.setEnabled(rightsPossible);
         allowExtraction.setEnabled(rightsPossible);
         allowModification.setEnabled(rightsPossible);

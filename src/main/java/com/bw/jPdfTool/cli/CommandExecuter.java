@@ -1,8 +1,10 @@
 package com.bw.jPdfTool.cli;
 
+import com.bw.jPdfTool.EInvoice;
 import com.bw.jPdfTool.Log;
 import com.bw.jPdfTool.Preferences;
 import com.bw.jPdfTool.Redactor;
+import com.bw.jPdfTool.SafeFile;
 import com.bw.jPdfTool.SignatureTool;
 import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.model.MergeOptions;
@@ -14,10 +16,8 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 
-import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -38,9 +38,20 @@ public class CommandExecuter {
     }
 
     /**
-     * Loads all files.
+     * Thrown if a file can't be loaded or merged.
      */
-    public void loadDocuments(String password2Load, MergeOptions mo) {
+    public static class LoadException extends java.io.IOException {
+        public LoadException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * Loads all files.
+     *
+     * @throws LoadException If a file can't be loaded or merged. Further files are not loaded.
+     */
+    public void loadDocuments(String password2Load, MergeOptions mo) throws LoadException {
 
         if (documentProxy != null)
             documentProxy.close();
@@ -57,6 +68,10 @@ public class CommandExecuter {
         for (Path p : files) {
             CliPdfLoader lw = new CliPdfLoader(documentProxy, p, mo, password2Load);
             lw.execute();
+            // The next loader resets the error, so check each file.
+            if (documentProxy.error != null)
+                throw new LoadException(String.format("Failed to load '%s': %s", p,
+                        documentProxy.error.replace('\n', ' ')));
         }
     }
 
@@ -81,8 +96,56 @@ public class CommandExecuter {
     }
 
     /**
-     * Split the effective document.
-     * The document is closed during the call.
+     * Checks if the effective document contains an invoice.
+     */
+    public boolean hasInvoice() {
+        return documentProxy != null && documentProxy.getDocument() != null
+                && EInvoice.hasInvoice(documentProxy.getDocument());
+    }
+
+    /**
+     * Writes the invoice XML of the effective document to a file.
+     *
+     * @return False if the document has no invoice.
+     */
+    public boolean extractInvoice(Path xmlFile) throws Exception {
+        PDDocument document = documentProxy == null ? null : documentProxy.getDocument();
+        if (document == null)
+            return false;
+        var xml = EInvoice.extractXml(document);
+        if (xml.isEmpty())
+            return false;
+        Files.write(xmlFile, xml.get());
+        return true;
+    }
+
+    /**
+     * Attaches an invoice XML (ZUGFeRD/Factur-X, CII syntax) to the effective document.
+     * An existing invoice is replaced.
+     */
+    public void attachInvoice(Path xmlFile) throws Exception {
+        if (documentProxy != null && documentProxy.getDocument() != null)
+            documentProxy.attachInvoice(Files.readAllBytes(xmlFile));
+    }
+
+    /**
+     * Removes the invoice from the effective document.
+     *
+     * @return True if there was an invoice.
+     */
+    public boolean removeInvoice() throws Exception {
+        return documentProxy != null && documentProxy.getDocument() != null && documentProxy.removeInvoice();
+    }
+
+    /**
+     * Validates a stored PDF with its invoice.
+     */
+    public EInvoice.Validation validateInvoice(Path pdfFile) throws Exception {
+        return EInvoice.validate(Files.readAllBytes(pdfFile), pdfFile.getFileName().toString());
+    }
+
+    /**
+     * Split the effective document. The effective document itself is not changed.
      */
     public void split(int pagePerDocument,
                       String ownerPwd, String userPwd,
@@ -91,37 +154,43 @@ public class CommandExecuter {
                       Path signatureKeyPath, char[] signatureKeyPwd) throws Exception {
 
         if (documentProxy != null && documentProxy.getDocument() != null) {
-            PDDocument document = documentProxy.getCopy();
             final boolean doSign = signatureKeyPath != null;
-            try {
-                String fprefix;
-                String fpostfix;
-                String fname = baseFileName.getFileName().toString();
-                int idx = fname.lastIndexOf('.');
-                if (idx < 0) {
-                    fprefix = baseFileName.toAbsolutePath().toString();
-                    fpostfix = ".pdf";
-                } else {
-                    fprefix = baseFileName.toAbsolutePath().getParent().resolve(fname.substring(0, idx)).toString();
-                    fpostfix = fname.substring(idx);
+
+            String fprefix;
+            String fpostfix;
+            String fname = baseFileName.getFileName().toString();
+            int idx = fname.lastIndexOf('.');
+            if (idx < 0) {
+                fprefix = baseFileName.toAbsolutePath().toString();
+                fpostfix = ".pdf";
+            } else {
+                fprefix = baseFileName.toAbsolutePath().getParent().resolve(fname.substring(0, idx)).toString();
+                fpostfix = fname.substring(idx);
+            }
+
+            int fileCount = 0;
+            String alias = null;
+            SignatureTool createSignature = null;
+
+            if (doSign) {
+                createSignature = new SignatureTool();
+                try (InputStream is = Files.newInputStream(signatureKeyPath)) {
+                    alias = createSignature.addKey(is, signatureKeyPwd);
                 }
+            }
 
-                int fileCount = 0;
-                String alias = null;
-                SignatureTool createSignature = null;
-
-                if (doSign) {
-                    createSignature = new SignatureTool();
-                    try (InputStream is = Files.newInputStream(signatureKeyPath)) {
-                        alias = createSignature.addKey(is, signatureKeyPwd);
-                    }
-                }
-
-                final PDDocument source = documentProxy.getCopy();
+            // Split a copy, the parts share resources with it, so it has to stay open until all parts are stored.
+            try (PDDocument source = documentProxy.getCopy()) {
+                final byte[] invoiceXml = EInvoice.extractXml(source).orElse(null);
                 Splitter splitter = new Splitter();
                 splitter.setSplitAtPage(pagePerDocument);
                 List<PDDocument> splittedDocs = splitter.split(source);
-                for (PDDocument doc : splittedDocs) {
+                for (PDDocument part : splittedDocs) {
+                    PDDocument doc = part;
+                    if (invoiceXml != null && fileCount == 0) {
+                        Log.error("The document contains an invoice. It is only kept in the first of the split documents.");
+                        doc = EInvoice.attach(doc, invoiceXml);
+                    }
                     String docFile = String.format("%s%03d%s", fprefix, ++fileCount, fpostfix);
                     if (doSign) {
                         saveDocument(doc, ownerPwd, userPwd, ap, encryptionKeyLength, Paths.get(docFile), createSignature, alias, signatureKeyPwd);
@@ -130,10 +199,6 @@ public class CommandExecuter {
                     }
                     Log.info("Stored file '%s'", docFile);
                 }
-                source.close();
-            } finally {
-                if (document != null)
-                    document.close();
             }
         }
     }
@@ -174,7 +239,11 @@ public class CommandExecuter {
         try {
             final boolean doSign = createSignature != null;
 
+            document = EInvoice.repair(document);
+
             if ((!ownerPwd.isEmpty()) || (!userPwd.isEmpty())) {
+                if (EInvoice.hasInvoice(document))
+                    Log.error("The document contains an invoice. Encryption is not allowed for PDF/A-3, so it is no valid ZUGFeRD/Factur-X document any more.");
                 StandardProtectionPolicy spp = new StandardProtectionPolicy(ownerPwd, userPwd, ap);
                 spp.setEncryptionKeyLength(encryptionKeyLength);
                 document.protect(spp);
@@ -189,14 +258,16 @@ public class CommandExecuter {
                 }
             }
 
-            try (OutputStream os = new BufferedOutputStream(Files.newOutputStream(file))) {
-                if (doSign) {
-                    createSignature.addSignature(document, keyAlias, signatureKeyPwd);
-                    document.saveIncremental(os);
-                } else {
-                    document.save(os);
-                }
-            }
+            // Signing happens while saving, if it fails, an existing file must stay as it is.
+            final PDDocument toSave = document;
+            if (doSign)
+                createSignature.addSignature(toSave, keyAlias, signatureKeyPwd);
+            SafeFile.write(file, os -> {
+                if (doSign)
+                    toSave.saveIncremental(os);
+                else
+                    toSave.save(os);
+            });
         } finally {
             if (document != null)
                 document.close();

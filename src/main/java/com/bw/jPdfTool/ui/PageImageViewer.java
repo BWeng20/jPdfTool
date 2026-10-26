@@ -1,5 +1,6 @@
 package com.bw.jPdfTool.ui;
 
+import com.bw.jPdfTool.Log;
 import com.bw.jPdfTool.Preferences;
 import com.bw.jPdfTool.model.Page;
 
@@ -162,7 +163,7 @@ public final class PageImageViewer extends JPanel {
             }
         }
         ImageIO.write(image, ext, selectedFile);
-        System.out.println("Written " + selectedFile);
+        Log.info("Written %s", selectedFile);
     }
 
 

@@ -1,5 +1,6 @@
 package com.bw.jPdfTool.model;
 
+import com.bw.jPdfTool.EInvoice;
 import com.bw.jPdfTool.Log;
 import com.bw.jPdfTool.Preferences;
 import com.bw.jPdfTool.Redactor;
@@ -42,6 +43,24 @@ public class DocumentProxy {
     public PdfLoadWorker currentLoader;
 
     public String error;
+
+    /**
+     * Optional check for documents that shall be appended to the effective document.
+     * Returns an error message to refuse the document, null to accept it.
+     */
+    public java.util.function.Function<PDDocument, String> appendCheck;
+
+    /**
+     * Checks a loaded document before it is appended, see {@link #appendCheck}.
+     *
+     * @return An error message if the document is refused, null if it can be used.
+     * The first document is always accepted, it is not appended.
+     */
+    public String checkAppend(PDDocument candidate) {
+        if (candidate == null || document == null || appendCheck == null)
+            return null;
+        return appendCheck.apply(candidate);
+    }
 
     public DocumentProxy(RenderQueue renderQueue) {
         this.renderQueue = renderQueue;
@@ -234,7 +253,7 @@ public class DocumentProxy {
     public void movePage(int pageNb, int offset) {
         ensuredDocument();
         final int pageCount = pages.size();
-        if (pageNb < 0 || pageNb > pageCount) {
+        if (pageNb < 1 || pageNb > pageCount) {
             throw new IllegalArgumentException("Page " + pageNb + " is out of range");
         }
 
@@ -392,6 +411,38 @@ public class DocumentProxy {
         refirePages();
     }
 
+    /**
+     * Attaches an invoice XML (ZUGFeRD/Factur-X) to the effective document, see {@link EInvoice#attachXml}.
+     * An existing invoice is replaced. The visible pages are not changed.
+     *
+     * @throws EInvoice.NotConformException If the result would be no valid invoice. The document is not changed then.
+     */
+    public void attachInvoice(byte[] xml) throws IOException {
+        ensuredDocument();
+        PDDocument newDocument = Loader.loadPDF(EInvoice.attachXmlStrict(getBytes(), xml));
+        PDDocument oldDocument;
+        synchronized (this) {
+            oldDocument = document;
+            document = newDocument;
+        }
+        IOUtils.closeQuietly(oldDocument);
+        fireDocumentLoaded();
+    }
+
+    /**
+     * Removes the invoice XML from the effective document.
+     *
+     * @return True if there was an invoice.
+     */
+    public boolean removeInvoice() throws IOException {
+        ensuredDocument();
+        boolean removed = EInvoice.removeXml(document);
+        if (removed)
+            // Let the UI update what depends on the invoice (e.g. the standards label).
+            fireDocumentLoaded();
+        return removed;
+    }
+
     public void deletePage(int pageNb) {
 
         ensuredDocument();
@@ -483,47 +534,28 @@ public class DocumentProxy {
                         pageCount = this.getDocument().getNumberOfPages();
                     } else {
                         // Append pages
+                        oldPageCount = this.getDocument().getNumberOfPages();
                         try {
-                            oldPageCount = this.getDocument().getNumberOfPages();
+                            if (EInvoice.hasInvoice(this.getDocument()) && EInvoice.hasInvoice(document)) {
+                                // Both would use the same attachment name, one invoice must go.
+                                Log.error("Both documents contain an invoice. Only the invoice of the first document is kept.");
+                                EInvoice.removeXml(document);
+                            }
                             PDFMergerUtility pdfMergerUtility = new PDFMergerUtility();
                             pdfMergerUtility.appendDocument(this.getDocument(), document);
                         } catch (Exception e) {
                             Log.error("Failed to merge. %s", e.getMessage());
+                            this.error = "Failed to merge: " + e.getMessage();
                             oldPageCount = -1;
                         } finally {
                             IOUtils.closeQuietly(document);
                         }
-                        pageCount = this.pages.size() + document.getNumberOfPages();
+                        // Count what was really appended, the merge may have failed.
+                        pageCount = this.getDocument().getNumberOfPages();
                     }
-                    // zipper merge if requested
-                    if (mo.startPageNb > 0 && mo.startPageNb < oldPageCount) {
-                        int targetPageIndex = mo.startPageNb - 1;
-                        int segmentCount = 0;
-                        int pageToMoveIndex = oldPageCount;
-                        PDPageTree tree = this.getDocument().getDocumentCatalog().getPages();
-
-                        while (pageToMoveIndex < pageCount) {
-
-                            PDPage pdPage = tree.get(pageToMoveIndex);
-                            if (targetPageIndex > 0) {
-                                PDPage prevPage = tree.get(targetPageIndex - 1);
-                                tree.remove(pageToMoveIndex);
-                                tree.insertAfter(pdPage, prevPage);
-                            } else {
-                                PDPage nextPage = tree.get(targetPageIndex);
-                                tree.remove(pageToMoveIndex);
-                                tree.insertBefore(pdPage, nextPage);
-                            }
-
-                            ++pageToMoveIndex;
-                            ++segmentCount;
-
-                            if (segmentCount >= mo.segmentLength && mo.gapLength > 0) {
-                                targetPageIndex += mo.gapLength;
-                            }
-                            ++targetPageIndex;
-
-                        }
+                    // zipper merge if requested (start is 1-based "insert before page", so the last page is allowed)
+                    if (oldPageCount > 0 && mo.startPageNb > 0 && mo.startPageNb <= oldPageCount) {
+                        zipperMerge(oldPageCount, pageCount, mo);
                         this.pages.clear();
                     }
 
@@ -544,6 +576,43 @@ public class DocumentProxy {
         }
     }
 
+
+    /**
+     * Moves the appended pages between the original pages.<br>
+     * The appended pages start at index oldPageCount. Starting before page {@link MergeOptions#startPageNb},
+     * {@link MergeOptions#segmentLength} new pages are inserted, then {@link MergeOptions#gapLength}
+     * original pages are skipped, and so on. New pages left over when the original pages run out stay at the end.
+     * A segment length &lt;= 0 inserts all new pages in one block.
+     *
+     * @param oldPageCount Number of pages before the merge.
+     * @param pageCount    Number of pages after the merge.
+     */
+    private void zipperMerge(int oldPageCount, int pageCount, MergeOptions mo) {
+        PDPageTree tree = this.getDocument().getDocumentCatalog().getPages();
+        int targetPageIndex = mo.startPageNb - 1;
+        int segmentCount = 0;
+
+        // Moving a page in front of the remaining new pages doesn't shift them,
+        // so the next new page to move is always at the next index.
+        for (int pageToMoveIndex = oldPageCount;
+             pageToMoveIndex < pageCount && targetPageIndex < pageToMoveIndex;
+             ++pageToMoveIndex) {
+
+            PDPage pdPage = tree.get(pageToMoveIndex);
+            tree.remove(pdPage);
+            if (targetPageIndex > 0)
+                tree.insertAfter(pdPage, tree.get(targetPageIndex - 1));
+            else
+                tree.insertBefore(pdPage, tree.get(0));
+            ++targetPageIndex;
+
+            if (mo.segmentLength > 0 && ++segmentCount >= mo.segmentLength) {
+                segmentCount = 0;
+                if (mo.gapLength > 0)
+                    targetPageIndex += mo.gapLength;
+            }
+        }
+    }
 
     /**
      * Interface to notify about rendered pages.
@@ -573,11 +642,22 @@ public class DocumentProxy {
      * @throws IOException If some write operation failed.
      */
     public PDDocument getCopy() throws IOException {
+        byte[] bytes = getBytes();
+        return bytes == null ? null : Loader.loadPDF(bytes);
+    }
+
+    /**
+     * Writes the effective document (without any security) to memory.
+     *
+     * @return The PDF or null if no document is loaded.
+     * @throws IOException If some write operation failed.
+     */
+    public byte[] getBytes() throws IOException {
         if (document != null) {
             document.setAllSecurityToBeRemoved(true);
             ByteArrayOutputStream os = new ByteArrayOutputStream(5 * 1024 * 1024);
             document.save(os, CompressParameters.NO_COMPRESSION);
-            return Loader.loadPDF(os.toByteArray());
+            return os.toByteArray();
         } else
             return null;
     }

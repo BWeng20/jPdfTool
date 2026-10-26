@@ -8,19 +8,7 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.rendering.PDFRenderer;
 
-import javax.swing.AbstractAction;
-import javax.swing.Action;
-import javax.swing.BorderFactory;
-import javax.swing.JButton;
-import javax.swing.JCheckBox;
-import javax.swing.JColorChooser;
-import javax.swing.JComponent;
-import javax.swing.JDialog;
-import javax.swing.JLabel;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
-import javax.swing.JTextField;
-import javax.swing.KeyStroke;
+import javax.swing.*;
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
@@ -126,8 +114,17 @@ public final class RedactionDialog extends JDialog {
 
         JLabel hint = new JLabel("<html>Drag with the mouse to mark areas. Click an area to select it, then move it, " +
                 "resize it at its edges or remove it (Delete key).<br>Marked areas are <b>permanently</b> removed " +
-                "and the page is converted to an image.</html>");
-        main.add(hint, BorderLayout.NORTH);
+                "and the page is converted to an image.</html>", JLabel.HORIZONTAL);
+        hint.setIconTextGap(0);
+        // Help button in the upper right corner, like in the main window.
+        JButton help = new JButton(javax.swing.UIManager.getIcon("OptionPane.questionIcon"));
+        help.setToolTipText("How redaction works");
+        help.addActionListener(e -> showHelp());
+
+        JPanel north = new JPanel(new BorderLayout(0,0));
+        north.add(hint, BorderLayout.CENTER);
+        north.add(help, BorderLayout.EAST);
+        main.add(north, BorderLayout.NORTH);
         main.add(canvas, BorderLayout.CENTER);
 
         JPanel south = new JPanel(new BorderLayout(0, 5));
@@ -182,6 +179,38 @@ public final class RedactionDialog extends JDialog {
         main.add(south, BorderLayout.SOUTH);
         getRootPane().setDefaultButton(applyButton);
         return main;
+    }
+
+    private void showHelp() {
+        JOptionPane.showMessageDialog(this,
+                "<html><font size='+2'><b>How Redaction Works</b></font><br><br>" +
+                        "<font size='+1'>" +
+                        "Simply drawing a black box over text doesn't remove it: the text is still in the file<br>" +
+                        "and can be copied or extracted. This tool therefore works differently:" +
+                        "<ol>" +
+                        "<li>Each page with marked areas is <b>rendered to an image</b> (resolution from<br>" +
+                        "<i>Options / Render Quality</i>).</li>" +
+                        "<li>The marked areas are <b>painted</b> into that image with the selected color.</li>" +
+                        "<li>The original page is <b>replaced</b> by the image.</li>" +
+                        "</ol>" +
+                        "All text, vector graphics and images of a redacted page are really gone - not only<br>" +
+                        "what is below the boxes. Pages without marked areas are not changed.<br><br>" +
+                        "<b>Consequences for redacted pages:</b>" +
+                        "<ul>" +
+                        "<li>Text can no longer be selected or searched (no OCR is done).</li>" +
+                        "<li>Links, comments and form fields on the page are dropped.</li>" +
+                        "<li>The file gets bigger, depending on the resolution.</li>" +
+                        "</ul>" +
+                        "<b>Not removed</b> - check these yourself:" +
+                        "<ul>" +
+                        "<li>Bookmarks (outline) and document information (title, author, ...) and XMP metadata.</li>" +
+                        "<li>Attached files. An e-invoice is detected, you are asked what to do with it.</li>" +
+                        "<li>Values of form fields: they are stored outside the page.</li>" +
+                        "</ul>" +
+                        "<b>Text search</b> only finds real text. Text inside images (e.g. scanned pages)<br>" +
+                        "is not found, mark such areas with the mouse." +
+                        "</font></html>",
+                "Help", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void addViewArea(Rectangle2D viewArea) {

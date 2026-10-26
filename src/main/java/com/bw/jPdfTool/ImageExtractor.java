@@ -57,7 +57,7 @@ public class ImageExtractor extends PageDrawer {
             BufferedImage image = renderer.renderImage(pageIndex);
 
             for (var i : renderer.extractor.images)
-                System.out.println("> " + i);
+                Log.debug("> %s", i);
             return renderer.extractor.images;
         } catch (IOException e) {
             Log.exception(e);

@@ -5,6 +5,7 @@ import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.model.MergeOptions;
 import com.bw.jPdfTool.model.PdfLoadWorker;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 
@@ -93,13 +94,23 @@ public class UIPdfLoadWorker extends SwingWorker<PDDocument, Void> implements Pd
                 if (passwordNeeded) {
                     requestOwnerPassword(file, mo, consumer);
                 } else {
-                    if (document != null) {
-                        if (consumer != null)
-                            consumer.accept(document);
+                    String refused = documentProxy.checkAppend(document);
+                    if (refused != null) {
+                        Log.info("Not appended (%s): %s", file, refused);
+                        IOUtils.closeQuietly(document);
+                        documentProxy.error = refused;
+                        documentProxy.fireDocumentLoaded();
+                        // The effective document is unchanged and fine: don't let the error block later updates.
+                        documentProxy.error = null;
+                    } else {
+                        if (document != null) {
+                            if (consumer != null)
+                                consumer.accept(document);
 
+                        }
+                        Log.debug("DONE (%s)", file);
+                        documentProxy.loaderFinished(document, mo);
                     }
-                    Log.debug("DONE (%s)", file);
-                    documentProxy.loaderFinished( document, mo);
                 }
             }
         } catch (Exception e) {

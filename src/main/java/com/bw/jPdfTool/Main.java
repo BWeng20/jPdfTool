@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
 /**
  * CLI interface. Accepts file names as arguments and opens the UI or executes commands headless.
  */
-@Command(name = "jPdfTool", mixinStandardHelpOptions = true, version = "jPdfBox 2.1",
+@Command(name = "jPdfTool", mixinStandardHelpOptions = true, version = "jPdfTool 2.1",
         footer = {
                 "",
                 "Permission flags have only effect if owner- or user-password is given.",
@@ -33,7 +33,7 @@ import java.util.regex.Pattern;
         })
 public class Main implements Callable<Integer> {
 
-    @Option(names = {"-out", "--out"}, required = true, description = "The path to the output file.")
+    @Option(names = {"-out", "--out"}, description = "The path to the output file. Without it (and without other options) the UI is opened with the given files.")
     private String out;
 
     @Option(names = {"-s", "--split"}, paramLabel = "<pages per file>", description = "Split resulting document. Output filename is extended by an index for each file.")
@@ -45,7 +45,7 @@ public class Main implements Callable<Integer> {
     @Option(names = {"-upw", "--userpassword"}, paramLabel = "<password>", description = "User password for the output PDF.")
     private String userpassword = "";
 
-    @Option(names = {"-pw", "--orginalpassword"}, paramLabel = "<password>", description = "Password for the input PDF.")
+    @Option(names = {"-pw", "--originalpassword", "--orginalpassword"}, paramLabel = "<password>", description = "Password for the input PDF. ('--orginalpassword' is the old, misspelled name, kept for compatibility.)")
     private String password2Load;
 
     @Parameters(paramLabel = "PDF File", description = "File(s) to load.")
@@ -95,18 +95,49 @@ public class Main implements Callable<Integer> {
             "Permanently removes an area. Values in points (1/72 inch) from the upper left corner of the page, e.g. '1:50,100,200,20'. The affected pages are converted to images.")
     private List<String> redactAreas = new ArrayList<>();
 
+    @Option(names = {"-ai", "--attachInvoice"}, paramLabel = "<xml file>", description =
+            "Attaches an invoice (ZUGFeRD/Factur-X, CII syntax) to the resulting PDF. An existing invoice is replaced. "
+                    + "The result is only valid if the PDF is PDF/A-3 compliant, use '-vi' to check that.")
+    private String attachInvoice = null;
+
+    @Option(names = {"-ei", "--extractInvoice"}, paramLabel = "<xml file>", description =
+            "Writes the invoice (ZUGFeRD/Factur-X) of the loaded document to a file.")
+    private String extractInvoice = null;
+
+    @Option(names = {"-ri", "--removeInvoice"}, description =
+            "Removes the invoice from the document. Required if you redact a document that contains an invoice.")
+    private boolean removeInvoice = false;
+
+    @Option(names = {"-vi", "--validateInvoice"}, description =
+            "Validates the resulting PDF and its invoice (PDF/A-3 and EN 16931). Can't be combined with '--split'.")
+    private boolean validateInvoice = false;
+
+    @Option(names = {"--debug"}, description = "Shows debug output and stack traces. Also possible with the system property 'jpdftool.debug=true'. Can be used together with file names to start the UI in debug mode.")
+    private boolean debug = false;
+
     @Spec
     private CommandSpec spec;
 
     @Override
     public Integer call() {
-        this.cli = true;
+        if (debug)
+            Log.setDebug(true);
+
+        // Only file names: open them in the UI. Any option means CLI (that then needs an output file).
+        // "--debug" works for both.
+        this.cli = this.out != null || spec.commandLine().getParseResult().matchedOptions().stream()
+                .anyMatch(o -> !o.longestName().equals("--debug"));
 
         if (helpRequested)
             return 0;
 
         if (this.out != null) {
             this.outfile = Paths.get(this.out);
+        }
+
+        if (attachInvoice != null && !Files.exists(Paths.get(attachInvoice))) {
+            System.err.printf("File '%s' doesn't exists.\n", attachInvoice);
+            return 10;
         }
 
         if (signCertFile != null) {
@@ -121,6 +152,8 @@ public class Main implements Callable<Integer> {
             signaturePassword = signCertPassword.toCharArray();
         signCertPassword = null;
 
+        if (fileArguments == null)
+            return 0;
         for (String f : fileArguments) {
             Path p = Paths.get(f);
             if (Files.exists(p))
@@ -155,8 +188,10 @@ public class Main implements Callable<Integer> {
             int exitCode = new CommandLine(main).execute(args);
             if (exitCode != 0 || main.helpRequested)
                 System.exit(exitCode);
-            else
+            else if (main.isCli())
                 System.exit(main.executeCommands());
+            else
+                main.createUI();
         } else {
             main.createUI();
         }
@@ -219,11 +254,56 @@ public class Main implements Callable<Integer> {
                 return 6;
             }
 
+            if (validateInvoice && splitToPagesPerFile > 0) {
+                System.err.println("'--validateInvoice' can't be combined with '--split'.");
+                usage(System.err);
+                return 7;
+            }
+
             // TODO: Currently all input files are merged and protected.
-            executer.loadDocuments(password2Load, mo);
+            try {
+                executer.loadDocuments(password2Load, mo);
+            } catch (CommandExecuter.LoadException e) {
+                System.err.println(e.getMessage());
+                return 14;
+            }
+
+            final boolean hasInvoice = executer.hasInvoice();
+
+            if (extractInvoice != null) {
+                if (executer.extractInvoice(Paths.get(extractInvoice)))
+                    System.out.println("Stored invoice to '" + extractInvoice + "'");
+                else {
+                    System.err.println("The document contains no invoice.");
+                    return 8;
+                }
+            }
+
+            if (hasInvoice && !removeInvoice && (!textPatterns.isEmpty() || !areas.isEmpty())) {
+                System.err.println("The document contains an invoice. Redaction doesn't touch its data, "
+                        + "so confidential data may remain in the invoice. Use '--removeInvoice' to drop it.");
+                return 9;
+            }
 
             if (!textPatterns.isEmpty() || !areas.isEmpty()) {
                 System.out.println("Redacted " + executer.redact(textPatterns, areas) + " areas");
+            }
+
+            if (removeInvoice) {
+                if (executer.removeInvoice())
+                    System.out.println("Removed invoice");
+                else
+                    System.out.println("The document contains no invoice");
+            }
+
+            if (attachInvoice != null) {
+                try {
+                    executer.attachInvoice(Paths.get(attachInvoice));
+                } catch (EInvoice.NotConformException e) {
+                    System.err.println(e.getMessage());
+                    return 13;
+                }
+                System.out.println("Attached invoice '" + attachInvoice + "'");
             }
 
             AccessPermission ap = new AccessPermission();
@@ -251,6 +331,22 @@ public class Main implements Callable<Integer> {
             } else {
                 executer.save(ownerpassword, userpassword, ap, encryptionKeyLength, outfile,
                         signatureFile, signaturePassword);
+            }
+
+            if (validateInvoice) {
+                EInvoice.Validation v;
+                try {
+                    v = executer.validateInvoice(outfile);
+                } catch (Exception e) {
+                    System.err.println("Validation failed: " + e.getMessage());
+                    return 11;
+                }
+                v.messages().forEach(System.err::println);
+                if (!v.valid()) {
+                    System.err.println("The resulting document is no valid invoice.");
+                    return 12;
+                }
+                System.out.println("The resulting document is a valid invoice.");
             }
 
 
