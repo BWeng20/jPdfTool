@@ -88,7 +88,13 @@ public class RenderQueue {
                                     if (pdPageCount > i) {
                                         Log.debug("Render page #%d", i);
                                         try {
+                                            final int generation = proxy.getRedrawGeneration();
                                             page.image = renderer.renderImageWithDPI(i, dpi);
+                                            if (generation != proxy.getRedrawGeneration()) {
+                                                // The content changed while rendering (e.g. a font was replaced): draw again.
+                                                page.image = null;
+                                                continue;
+                                            }
                                             if (page.image == null) {
                                                 page.error = "Page not rendered (unknown error)";
 

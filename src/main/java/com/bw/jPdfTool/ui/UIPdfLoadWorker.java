@@ -1,6 +1,7 @@
 package com.bw.jPdfTool.ui;
 
 import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.PdfRisk;
 import com.bw.jPdfTool.model.DocumentProxy;
 import com.bw.jPdfTool.model.MergeOptions;
 import com.bw.jPdfTool.model.PdfLoadWorker;
@@ -16,6 +17,7 @@ import javax.swing.SwingWorker;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.function.Consumer;
 
 public class UIPdfLoadWorker extends SwingWorker<PDDocument, Void> implements PdfLoadWorker {
@@ -28,6 +30,7 @@ public class UIPdfLoadWorker extends SwingWorker<PDDocument, Void> implements Pd
     private final JPasswordField passwordField = new JPasswordField();
     private final String ownerPassword;
     private boolean finished = false;
+    private volatile List<String> risks = List.of();
 
     public UIPdfLoadWorker(DocumentProxy documentProxy, Path file,
                            String ownerPassword,
@@ -47,6 +50,8 @@ public class UIPdfLoadWorker extends SwingWorker<PDDocument, Void> implements Pd
                     ? Loader.loadPDF(data, ownerPassword)
                     : Loader.loadPDF(data);
             documentProxy.error = null;
+            // Before the security is removed, the original state is still visible.
+            risks = PdfRisk.inspect(document, data);
             document.setAllSecurityToBeRemoved(true);
             return document;
         } catch (InvalidPasswordException ep) {
@@ -104,6 +109,7 @@ public class UIPdfLoadWorker extends SwingWorker<PDDocument, Void> implements Pd
                         documentProxy.error = null;
                     } else {
                         if (document != null) {
+                            documentProxy.reportRisks(file.getFileName().toString(), risks);
                             if (consumer != null)
                                 consumer.accept(document);
 

@@ -114,7 +114,7 @@ public final class RedactionDialog extends JDialog {
 
         JLabel hint = new JLabel("<html>Drag with the mouse to mark areas. Click an area to select it, then move it, " +
                 "resize it at its edges or remove it (Delete key).<br>Marked areas are <b>permanently</b> removed " +
-                "and the page is converted to an image.</html>", JLabel.HORIZONTAL);
+                "and the page is converted to an image.</html>", SwingConstants.CENTER);
         hint.setIconTextGap(0);
         // Help button in the upper right corner, like in the main window.
         JButton help = new JButton(javax.swing.UIManager.getIcon("OptionPane.questionIcon"));
@@ -237,6 +237,9 @@ public final class RedactionDialog extends JDialog {
             return;
         try {
             List<Redactor.Region> found = Redactor.findText(document, Pattern.compile(text));
+            String warning = Redactor.textSearchWarning(Redactor.pagesWithoutText(document));
+            if (warning != null)
+                JOptionPane.showMessageDialog(this, warning, "Find", JOptionPane.WARNING_MESSAGE);
             int added = 0;
             for (Redactor.Region r : found) {
                 if (allPages.isSelected() || r.pageNb == pageNb) {
@@ -351,8 +354,8 @@ public final class RedactionDialog extends JDialog {
 
         private BufferedImage image;
         private Color color = Color.BLACK;
-        private Color selectColor = Color.RED;
-        private BasicStroke stroke = new BasicStroke(2f);
+        private final Color selectColor = Color.RED;
+        private final BasicStroke stroke = new BasicStroke(2f);
         private double pixelsPerPoint = 1;
         private final List<Rectangle2D> areas = new ArrayList<>();
         private int selected = -1;

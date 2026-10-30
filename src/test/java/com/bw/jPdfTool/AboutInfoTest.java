@@ -17,4 +17,24 @@ class AboutInfoTest {
     void licenseIsPartOfTheBuild() {
         Assertions.assertTrue(AboutInfo.licenseText().contains("unencumbered software"), "LICENSE resource");
     }
+
+    @Test
+    void everyComponentHasALicense() {
+        var components = AboutInfo.components();
+        Assertions.assertTrue(components.stream().anyMatch(c -> c.name().equals("org.apache.pdfbox:pdfbox")));
+        Assertions.assertTrue(components.stream().anyMatch(c -> c.name().startsWith("Arimo")));
+        for (var c : components) {
+            Assertions.assertNotEquals("unknown", c.license(), "License missing in AboutInfo for " + c.name());
+            Assertions.assertTrue(c.licenseUrl() != null && c.licenseUrl().startsWith("https://"), c.name());
+        }
+        Assertions.assertTrue(AboutInfo.asText().contains("(https://www.apache.org/licenses/LICENSE-2.0)"));
+    }
+
+    @Test
+    void fontLicenseIsPartOfTheBuild() throws Exception {
+        try (var is = AboutInfo.class.getResourceAsStream("/fonts/LICENSE-Apache-2.0.txt")) {
+            Assertions.assertNotNull(is);
+            Assertions.assertTrue(new String(is.readAllBytes()).contains("Apache License"));
+        }
+    }
 }

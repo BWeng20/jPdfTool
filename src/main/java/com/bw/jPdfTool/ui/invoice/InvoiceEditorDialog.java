@@ -371,7 +371,7 @@ public class InvoiceEditorDialog extends JDialog {
             if (role == Role.BUYER && data.applyBuyerPaymentDefaults())
                 reloadForm();
             changed();
-        });
+        }, role == Role.BUYER ? data::takePaymentConditions : null);
         panel[0] = new PartyPanel(role == Role.SELLER, "Preset", chooser);
         panel[0].setParty(party);
         panel[0].setBaseline(party.copy());

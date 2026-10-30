@@ -538,6 +538,25 @@ public final class InvoiceData {
     }
 
     /**
+     * The opposite of {@link #applyBuyerPaymentDefaults}: puts the payment conditions of this invoice into a buyer
+     * (a proposal for the presets): the payment terms and the days from the issue date to the due date.
+     * Conditions the invoice doesn't have leave the value of the buyer as it is.
+     *
+     * @param proposal The buyer to change, usually a copy of {@link #buyer}.
+     */
+    public void takePaymentConditions(Party proposal) {
+        if (!supports(Field.PAYMENT))
+            return;
+        if (isSet(paymentTerms))
+            proposal.paymentTerms = paymentTerms.trim();
+        if (issueDate != null && dueDate != null) {
+            long days = java.time.temporal.ChronoUnit.DAYS.between(issueDate, dueDate);
+            if (days >= 0 && days <= 9999)
+                proposal.paymentDays = (int) days;
+        }
+    }
+
+    /**
      * @param address        True if the address is required.
      * @param countryNeeded  True if the country is required even without the address.
      */
@@ -915,10 +934,6 @@ public final class InvoiceData {
         if (d == null && s != null)
             unreadableDates.put(caption, s);
         return d;
-    }
-
-    private static LocalDate parseDate(String s) {
-        return parseDate(s, null);
     }
 
     /**

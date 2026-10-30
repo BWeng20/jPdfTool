@@ -2,6 +2,7 @@ package com.bw.jPdfTool.cli;
 
 import com.bw.jPdfTool.invoice.EInvoice;
 import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.PdfRisk;
 import com.bw.jPdfTool.Preferences;
 import com.bw.jPdfTool.Redactor;
 import com.bw.jPdfTool.SafeFile;
@@ -90,8 +91,16 @@ public class CommandExecuter {
         for (Pattern p : patterns) {
             regions.addAll(Redactor.findText(document, p));
         }
+        if (!patterns.isEmpty()) {
+            String warning = Redactor.textSearchWarning(Redactor.pagesWithoutText(document));
+            if (warning != null)
+                Log.error("Warning: %s", warning);
+        }
         Preferences prefs = Preferences.getInstance();
+        final boolean tagged = PdfRisk.isTagged(document);
         Redactor.redact(document, regions, prefs.getDpi(), prefs.getRedactionColor());
+        if (!regions.isEmpty())
+            documentProxy.reportRisks("Redaction", PdfRisk.tagsLost(tagged, null));
         return regions.size();
     }
 
@@ -185,6 +194,8 @@ public class CommandExecuter {
                 Splitter splitter = new Splitter();
                 splitter.setSplitAtPage(pagePerDocument);
                 List<PDDocument> splittedDocs = splitter.split(source);
+                if (!splittedDocs.isEmpty())
+                    documentProxy.reportRisks("Split", PdfRisk.tagsLost(PdfRisk.isTagged(source), splittedDocs.get(0)));
                 for (PDDocument part : splittedDocs) {
                     PDDocument doc = part;
                     if (invoiceXml != null && fileCount == 0) {

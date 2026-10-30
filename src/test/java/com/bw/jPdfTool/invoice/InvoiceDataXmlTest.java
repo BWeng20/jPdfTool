@@ -371,6 +371,30 @@ class InvoiceDataXmlTest {
     }
 
     @Test
+    void takePaymentConditions_fromTheInvoice() {
+        InvoiceData d = InvoiceDataTest.sample();
+        d.paymentTerms = " Net 14 days ";
+        d.issueDate = java.time.LocalDate.of(2026, 10, 29);
+        d.dueDate = java.time.LocalDate.of(2026, 11, 12);
+        Party proposal = d.buyer.copy();
+        d.takePaymentConditions(proposal);
+        Assertions.assertEquals("Net 14 days", proposal.paymentTerms);
+        Assertions.assertEquals(14, proposal.paymentDays);
+
+        // What the invoice doesn't have stays as it is; a due date before the issue date gives no days.
+        proposal.paymentTerms = "Keep";
+        proposal.paymentDays = 7;
+        d.paymentTerms = null;
+        d.dueDate = java.time.LocalDate.of(2026, 10, 1);
+        d.takePaymentConditions(proposal);
+        Assertions.assertEquals("Keep", proposal.paymentTerms);
+        Assertions.assertEquals(7, proposal.paymentDays);
+        d.dueDate = null;
+        d.takePaymentConditions(proposal);
+        Assertions.assertEquals(7, proposal.paymentDays);
+    }
+
+    @Test
     void buyerPaymentDefaults_areStoredInThePresets() throws Exception {
         Party p = InvoiceDataTest.sample().buyer;
         p.paymentTerms = "Net 14 days";

@@ -1,5 +1,7 @@
 package com.bw.jPdfTool;
 
+import com.bw.jPdfTool.fonts.FontEmbedException;
+import com.bw.jPdfTool.fonts.PdfFontEmbedder;
 import com.bw.jPdfTool.invoice.EInvoice;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.common.PDMetadata;
@@ -105,11 +107,13 @@ public final class PdfStandard {
      * <li>transfer functions and halftones in graphics states, unknown rendering intents</li>
      * <li>JavaScript, launch/sound/movie/... actions and additional actions (/AA) of the catalog and form fields</li>
      * <li>annotation flags: printable, not hidden</li>
+     * <li>fonts without font program: a metric compatible free substitute is embedded, see {@link PdfFontEmbedder}</li>
      * </ul>
-     * Problems that need real conversion (not embedded fonts, encryption, ...) are left to the validation.
+     * Other problems that need real conversion (encryption, ...) are left to the validation.
      *
      * @param document The document.
      * @return What was changed and how often, empty if the document was not changed.
+     * @throws FontEmbedException If a font can't be embedded.
      */
     public static java.util.Map<String, Integer> fixPdfaIssues(PDDocument document) throws java.io.IOException {
         java.util.Map<String, Integer> changes = new java.util.LinkedHashMap<>();

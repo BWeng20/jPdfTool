@@ -17,6 +17,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.function.Consumer;
 
 /**
  * Combo box with the seller or buyer presets and buttons to take over changes and to manage them.<br>
@@ -36,6 +37,7 @@ class PresetChooser extends JPanel {
 
     private final Role role;
     private final Party target;
+    private final Consumer<Party> currentValues;
     private final JComboBox<Party> combo = new JComboBox<>();
     private final JButton update = new JButton();
     private List<Party> presets = List.of();
@@ -47,9 +49,18 @@ class PresetChooser extends JPanel {
      * @param onApplied Called after a preset was copied into the target (to show the new values).
      */
     PresetChooser(Role role, Party target, Runnable onApplied) {
+        this(role, target, onApplied, null);
+    }
+
+    /**
+     * @param currentValues Adds more values of the invoice to the party, which is taken over into a preset
+     *                      (e.g. the payment conditions of a buyer). May be null.
+     */
+    PresetChooser(Role role, Party target, Runnable onApplied, Consumer<Party> currentValues) {
         super(new BorderLayout(6, 0));
         this.role = role;
         this.target = target;
+        this.currentValues = currentValues;
         combo.setRenderer(new DefaultListCellRenderer() {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
@@ -69,7 +80,7 @@ class PresetChooser extends JPanel {
             refreshButton();
         });
 
-        update.addActionListener(e -> edit(target));
+        update.addActionListener(e -> edit(proposal()));
         JButton manage = new JButton("Manage…");
         manage.setToolTipText("Add, change or remove the sellers and buyers.");
         manage.addActionListener(e -> edit(null));
@@ -81,6 +92,16 @@ class PresetChooser extends JPanel {
         add(combo, BorderLayout.CENTER);
         add(buttons, BorderLayout.EAST);
         refreshButton();
+    }
+
+    /**
+     * The party with all current values of the invoice, which belong into a preset.
+     */
+    private Party proposal() {
+        Party p = target.copy();
+        if (currentValues != null)
+            currentValues.accept(p);
+        return p;
     }
 
     /**

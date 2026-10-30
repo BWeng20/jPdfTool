@@ -87,7 +87,12 @@ Pure XML invoices (XRechnung) are not supported. Based on the https://www.mustan
 * Merging keeps the invoice. If both documents contain an invoice, only the one of the first document is kept.
 * Splitting keeps the invoice in the *first* part only, as a part is not the complete invoice any more.
 * Redaction doesn't touch the invoice data, so confidential data may remain in the XML. The UI asks what to do, the CLI refuses to redact such a document unless `--removeInvoice` is given.
-* Attaching an XML fails with an error (CLI exit code 13) if the result is not a conform PDF/A-3 / EN 16931 document, e.g. because the PDF uses fonts that are not embedded. The document is not changed then. Converting arbitrary PDFs to PDF/A-3 is not supported.
+* Fonts that are not embedded are embedded when PDF/A-3 is enforced (option _PDF/A-3_, attaching an invoice): a metric compatible substitute replaces them (Arial/Helvetica by Arimo, Times by Tinos, Courier by Cousine, all others by the closest family). Text and characters stay, but fonts that are not metric compatible (e.g. Calibri) get the look and spacing of the substitute. Arimo, Tinos and Cousine are the Chrome OS core fonts, licensed under the Apache License 2.0 (`fonts/LICENSE-Apache-2.0.txt` in the jar). The licenses of all libraries and fonts are listed in the About dialog.
+* Composite (CID) fonts (encoding Identity-H, as written by Word, Chrome or LibreOffice) are substituted too: their characters are taken from the _ToUnicode_ table of the font, the codes are mapped to the glyphs of the substitute. Not possible are composite fonts without ToUnicode table or with another encoding, characters the substitute doesn't have (e.g. Chinese), and symbol fonts (Symbol, Wingdings, ...). The UI then reports the fonts and switches _PDF/A-3_ off, attaching an invoice fails (CLI exit code 13). The document is not changed then.
+* The menu _Fonts_ lists the fonts of the document. A selected font can be replaced by one of the bundled fonts, the best match is proposed. The text keeps its characters, the widths are those of the new font.
+* Own fonts: _Fonts > Imported Fonts..._ (or the button in the _Replace Font_ dialog) imports TrueType font files (`.ttf`). They are listed below the bundled fonts under their own heading and can be removed again (the font file itself is not touched). Name and path are stored in `~/.jPdfTool/fonts.json`; a font file is read only when the font is shown in the preview or used. Not usable: fonts with PostScript outlines (OpenType/CFF), font collections (`.ttc`), and fonts that forbid embedding (OS/2 fsType). A font that lacks characters of the text to be replaced is refused with the list of the missing characters; the document is not changed then. Bundled and imported fonts can both be used, but only subsets of the bundled fonts are written again when composite fonts are merged.
+* _Merge Duplicates_ in the font list merges fonts that exist more than once, e.g. one copy per page. Fonts with exactly the same content (font dictionary, widths, encoding, ToUnicode and font program) are merged; the resource name _/Name_ and the hints of the font descriptor are ignored. Composite fonts (Word) that are different subsets of the same font are merged too, if the codes of the pages don't have to change: when all codes of one font are in the other with the same character and width, the first is replaced by the other; when both have codes of their own, but nothing contradicts, and both are subsets of one of the bundled fonts (e.g. after _Replace_), the font is written again with the codes of both. Fonts with contradicting codes, other weights or other types (like the simple space fonts of Word next to its composite fonts) are not merged.
+* Attaching an XML fails with an error (CLI exit code 13) if the result is not a conform PDF/A-3 / EN 16931 document. The document is not changed then. Converting arbitrary PDFs to PDF/A-3 is not supported.
 * Encryption is not allowed for PDF/A-3. An encrypted document is no valid e-invoice any more. The CLI only encrypts if a password is given and logs a warning then.
 
 <<<
@@ -218,7 +223,7 @@ Because the tool uses *PDFBox* for all the magic, there are special consideratio
 
 == Dependencies
 
-The libraries the tool uses (versions are defined in `build.gradle`):
+The libraries and fonts the tool uses (versions are defined in `build.gradle`). The code needs Java 17 or newer.
 
 [cols="2,3,5",options="header"]
 |===
@@ -259,6 +264,10 @@ The libraries the tool uses (versions are defined in `build.gradle`):
 |https://picocli.info[picocli]
 |Command line interface
 |Parses the command line options, creates the help text and the exit codes. The annotation processor `picocli-codegen` checks the option annotations while compiling.
+
+|https://fonts.google.com/specimen/Arimo[Arimo, Tinos, Cousine] (bundled `.ttf` files)
+|Substitute fonts
+|Metric compatible replacements for Arial/Helvetica, Times and Courier. They are embedded when fonts are missing for PDF/A-3 and offered in the _Fonts_ menu. Licensed under the Apache License 2.0.
 
 |https://junit.org/junit5/[JUnit 5]
 |Tests

@@ -7,6 +7,7 @@ import com.bw.jPdfTool.Log;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JDialog;
+import javax.swing.JEditorPane;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -14,6 +15,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.event.HyperlinkEvent;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Cursor;
@@ -31,7 +33,7 @@ import java.awt.event.MouseEvent;
 import java.net.URI;
 
 /**
- * The About dialog: version, build date, license, the system and the libraries.
+ * The About dialog: version, build date, license, the system, and the libraries and fonts with their licenses.
  */
 public final class AboutDialog {
 
@@ -75,12 +77,15 @@ public final class AboutDialog {
         gc.fill = GridBagConstraints.BOTH;
         gc.weightx = 1;
         gc.weighty = 1;
-        JTextArea details = new JTextArea(details());
+        JEditorPane details = new JEditorPane("text/html", details());
         details.setEditable(false);
-        details.setFont(new Font(Font.MONOSPACED, Font.PLAIN, details.getFont().getSize()));
         details.setCaretPosition(0);
+        details.addHyperlinkListener(e -> {
+            if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED && e.getURL() != null)
+                browse(e.getURL().toString());
+        });
         JScrollPane scroll = new JScrollPane(details);
-        scroll.setPreferredSize(new Dimension(440, 200));
+        scroll.setPreferredSize(new Dimension(520, 240));
         content.add(scroll, gc);
 
         JButton copy = new JButton("Copy Info");
@@ -104,16 +109,39 @@ public final class AboutDialog {
         dialog.setVisible(true);
     }
 
+    private static String escape(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
     /**
-     * Java, system and libraries, as shown in the text area.
+     * Java, system, libraries and fonts with their licenses, as shown in the details area.
      */
     private static String details() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Java    ").append(AboutInfo.java()).append('\n');
-        sb.append("System  ").append(AboutInfo.os()).append("\n\n");
-        sb.append("Libraries\n");
-        AboutInfo.libraries().forEach(l -> sb.append("  ").append(l).append('\n'));
-        return sb.toString();
+        StringBuilder sb = new StringBuilder("<html><body style=\"font-family:SansSerif\">");
+        sb.append("<b>Java</b> ").append(escape(AboutInfo.java())).append("<br>");
+        sb.append("<b>System</b> ").append(escape(AboutInfo.os())).append("<br><br>");
+        sb.append("<b>Libraries and fonts</b><table cellspacing=\"0\" cellpadding=\"2\">");
+        for (AboutInfo.Component c : AboutInfo.components()) {
+            sb.append("<tr><td>").append(escape(c.name()));
+            if (!c.version().isEmpty())
+                sb.append(' ').append(escape(c.version()));
+            sb.append("</td><td>&nbsp;&nbsp;");
+            if (c.licenseUrl() == null)
+                sb.append(escape(c.license()));
+            else
+                sb.append("<a href=\"").append(c.licenseUrl()).append("\">").append(escape(c.license())).append("</a>");
+            sb.append("</td></tr>");
+        }
+        return sb.append("</table></body></html>").toString();
+    }
+
+    private static void browse(String url) {
+        try {
+            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE))
+                Desktop.getDesktop().browse(URI.create(url));
+        } catch (Exception ex) {
+            Log.error("Failed to open %s: %s", url, ex.getMessage());
+        }
     }
 
     private static JPanel licenseRow(JDialog dialog) {
@@ -140,11 +168,7 @@ public final class AboutDialog {
             l.addMouseListener(new MouseAdapter() {
                 @Override
                 public void mouseClicked(MouseEvent e) {
-                    try {
-                        Desktop.getDesktop().browse(URI.create(url));
-                    } catch (Exception ex) {
-                        Log.error("Failed to open %s: %s", url, ex.getMessage());
-                    }
+                    browse(url);
                 }
             });
         }

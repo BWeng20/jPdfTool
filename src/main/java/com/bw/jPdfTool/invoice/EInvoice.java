@@ -1,5 +1,6 @@
 package com.bw.jPdfTool.invoice;
 
+import com.bw.jPdfTool.fonts.FontEmbedException;
 import com.bw.jPdfTool.Log;
 import com.bw.jPdfTool.PdfStandard;
 import org.apache.pdfbox.Loader;
@@ -329,8 +330,12 @@ public final class EInvoice {
      */
     static byte[] fixPdfaIssues(byte[] pdf) throws IOException {
         try (PDDocument document = Loader.loadPDF(pdf)) {
-            if (PdfStandard.fixPdfaIssues(document).isEmpty())
-                return pdf;
+            try {
+                if (PdfStandard.fixPdfaIssues(document).isEmpty())
+                    return pdf;
+            } catch (FontEmbedException e) {
+                throw new NotConformException(e.getMessage());
+            }
             ByteArrayOutputStream os = new ByteArrayOutputStream(pdf.length + 1024);
             document.save(os);
             return os.toByteArray();

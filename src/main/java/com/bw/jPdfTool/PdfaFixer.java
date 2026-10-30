@@ -1,5 +1,7 @@
 package com.bw.jPdfTool;
 
+import com.bw.jPdfTool.fonts.FontEmbedException;
+import com.bw.jPdfTool.fonts.PdfFontEmbedder;
 import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
@@ -15,7 +17,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,10 +41,12 @@ final class PdfaFixer {
     private static final COSName HTP = COSName.getPDFName("HTP");
     private static final COSName JAVASCRIPT = COSName.getPDFName("JavaScript");
     private static final COSName OPEN_ACTION = COSName.getPDFName("OpenAction");
+    private static final Set<String> FONT_TYPES = Set.of("Type0", "Type1", "MMType1", "TrueType");
     private static final int FLAG_HIDDEN = 2, FLAG_PRINT = 4, FLAG_NOVIEW = 32;
 
     private final Set<COSBase> visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
     private final List<COSStream> contents = new ArrayList<>();
+    private final List<COSDictionary> fonts = new ArrayList<>();
     /**
      * What was changed and how often, in the order of the first change.
      */
@@ -91,6 +97,10 @@ final class PdfaFixer {
         COSName subtype = d.getCOSName(COSName.SUBTYPE);
         boolean stream = d instanceof COSStream;
 
+        if (!stream && d.containsKey(COSName.BASE_FONT) && subtype != null
+                && FONT_TYPES.contains(subtype.getName()))
+            fonts.add(d);
+
         if (stream) {
             remove(d, COSName.F);
             remove(d, COSName.F_FILTER);
@@ -134,7 +144,18 @@ final class PdfaFixer {
                 }
     }
 
-    void visit(COSBase base) {
+    /**
+     * Walks the object graph depth-first with an explicit stack: chains like outline /Next links can be
+     * thousands of levels deep, which would overflow the call stack with recursion.
+     */
+    void visit(COSBase root) {
+        Deque<COSBase> stack = new ArrayDeque<>();
+        stack.push(root);
+        while (!stack.isEmpty())
+            visitOne(stack.pop(), stack);
+    }
+
+    private void visitOne(COSBase base, Deque<COSBase> stack) {
         if (base instanceof COSObject o)
             base = o.getObject();
         if (base == null || !visited.add(base))
@@ -160,11 +181,13 @@ final class PdfaFixer {
                         contents.add(s);
                     else if (p instanceof COSStream s)
                         contents.add(s);
-            for (COSBase v : d.getValues())
-                visit(v);
+            // Pushed in reverse to visit the values in their order.
+            List<COSBase> values = new ArrayList<>(d.getValues());
+            for (int i = values.size() - 1; i >= 0; --i)
+                stack.push(values.get(i));
         } else if (base instanceof COSArray a) {
-            for (int i = 0; i < a.size(); ++i)
-                visit(a.get(i));
+            for (int i = a.size() - 1; i >= 0; --i)
+                stack.push(a.get(i));
         }
     }
 
@@ -203,11 +226,13 @@ final class PdfaFixer {
 
     /**
      * @return What was changed and how often, empty if nothing.
+     * @throws FontEmbedException If fonts can't be embedded.
      */
     static Map<String, Integer> fix(PDDocument document) throws IOException {
         PdfaFixer fixer = new PdfaFixer();
         fixer.visit(document.getDocument().getTrailer());
         fixer.fixContentStreams();
+        fixer.changes.putAll(PdfFontEmbedder.embed(document, fixer.fonts));
         return fixer.changes;
     }
 }

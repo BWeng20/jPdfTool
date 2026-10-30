@@ -36,17 +36,24 @@ public class EInvoiceTest {
     }
 
     /**
-     * A PDF with a not embedded font: it can't be PDF/A.
+     * A PDF with a not embedded symbol font: there is no substitute, so it can't be PDF/A.
      */
     public static byte[] nonConformPdf() throws IOException {
+        return notEmbeddedFontPdf(Standard14Fonts.FontName.SYMBOL, "αβ");
+    }
+
+    /**
+     * A PDF with a not embedded font.
+     */
+    public static byte[] notEmbeddedFontPdf(Standard14Fonts.FontName font, String text) throws IOException {
         try (PDDocument doc = new PDDocument()) {
             PDPage page = new PDPage();
             doc.addPage(page);
             try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
                 cs.beginText();
-                cs.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                cs.setFont(new PDType1Font(font), 12);
                 cs.newLineAtOffset(72, 700);
-                cs.showText("Not embedded font");
+                cs.showText(text);
                 cs.endText();
             }
             ByteArrayOutputStream os = new ByteArrayOutputStream();
@@ -86,6 +93,16 @@ public class EInvoiceTest {
         Assertions.assertThrows(EInvoice.NotConformException.class,
                 () -> EInvoice.attachXmlStrict(nonConformPdf(), sampleXml()));
         Assertions.assertDoesNotThrow(() -> EInvoice.attachXmlStrict(plainPdf(1), sampleXml()));
+    }
+
+    @Test
+    void test_attachStrictEmbedsMissingFonts() throws Exception {
+        byte[] pdf = notEmbeddedFontPdf(Standard14Fonts.FontName.HELVETICA, "Not embedded font");
+        byte[] result = Assertions.assertDoesNotThrow(() -> EInvoice.attachXmlStrict(pdf, sampleXml()));
+        try (PDDocument doc = Loader.loadPDF(result)) {
+            Assertions.assertTrue(EInvoice.hasInvoice(doc));
+            Assertions.assertTrue(new org.apache.pdfbox.text.PDFTextStripper().getText(doc).contains("Not embedded font"));
+        }
     }
 
     @Test

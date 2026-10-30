@@ -3,6 +3,11 @@ package com.bw.jPdfTool.model;
 import com.bw.jPdfTool.invoice.EInvoice;
 import com.bw.jPdfTool.DocumentInformation;
 import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.fonts.FontSource;
+import com.bw.jPdfTool.fonts.PdfFontEmbedder;
+import com.bw.jPdfTool.fonts.PdfFontMerger;
+import com.bw.jPdfTool.fonts.PdfFonts;
+import com.bw.jPdfTool.PdfRisk;
 import com.bw.jPdfTool.PdfStandard;
 import com.bw.jPdfTool.Preferences;
 import com.bw.jPdfTool.Redactor;
@@ -58,6 +63,24 @@ public class DocumentProxy {
      * invoice was attached, see {@link #attachInvoice}.
      */
     public java.util.function.Consumer<Map<String, Integer>> pdfaFixListener;
+
+    /**
+     * Called (from any thread) with the file name and the warnings of {@link com.bw.jPdfTool.PdfRisk}
+     * for each loaded file. Without a listener the warnings are written to stderr.
+     */
+    public java.util.function.BiConsumer<String, List<String>> riskListener;
+
+    /**
+     * Reports what is unsupported or gets lost in a loaded file, see {@link #riskListener}.
+     */
+    public void reportRisks(String fileName, List<String> risks) {
+        if (risks.isEmpty())
+            return;
+        if (riskListener != null)
+            riskListener.accept(fileName, risks);
+        else
+            risks.forEach(r -> Log.error("Warning (%s): %s", fileName, r));
+    }
 
     /**
      * Checks a loaded document before it is appended, see {@link #appendCheck}.
@@ -379,7 +402,10 @@ public class DocumentProxy {
             int pageIndex = pageNb - 1;
 
             try {
+                final boolean tagged = PdfRisk.isTagged(document);
                 renderPageToImage(pdfRenderer, pageIndex);
+                // The page is an image now, its tags are gone.
+                reportRisks("To Image", PdfRisk.tagsLost(tagged, null));
                 refirePages();
             } catch (Exception e) {
                 Log.exception(e);
@@ -390,10 +416,12 @@ public class DocumentProxy {
     public void renderAllPagesToImage() {
         ensuredDocument();
         try {
+            final boolean tagged = PdfRisk.isTagged(document);
             PDFRenderer pdfRenderer = new PDFRenderer(document);
             for (int pageIndex = 0; pageIndex < document.getNumberOfPages(); ++pageIndex) {
                 renderPageToImage(pdfRenderer, pageIndex);
             }
+            reportRisks("To Image", PdfRisk.tagsLost(tagged, null));
         } catch (Exception e) {
             Log.exception(e);
         }
@@ -409,7 +437,11 @@ public class DocumentProxy {
     public void redact(List<Redactor.Region> regions) throws IOException {
         ensuredDocument();
         Preferences prefs = Preferences.getInstance();
+        final boolean tagged = PdfRisk.isTagged(document);
         Redactor.redact(document, regions, prefs.getDpi(), prefs.getRedactionColor());
+        // The redacted pages are images now, their tags are gone.
+        if (!regions.isEmpty())
+            reportRisks("Redaction", PdfRisk.tagsLost(tagged, null));
         synchronized (this) {
             for (Redactor.Region r : regions) {
                 Page p = pages.get(r.pageNb - 1);
@@ -430,7 +462,12 @@ public class DocumentProxy {
      */
     public void attachInvoice(byte[] xml) throws IOException {
         ensuredDocument();
-        Map<String, Integer> changes = fixPdfa();
+        Map<String, Integer> changes;
+        try {
+            changes = fixPdfa();
+        } catch (com.bw.jPdfTool.fonts.FontEmbedException e) {
+            throw new EInvoice.NotConformException(e.getMessage());
+        }
         if (!changes.isEmpty() && pdfaFixListener != null)
             pdfaFixListener.accept(changes);
         PDDocument newDocument = Loader.loadPDF(EInvoice.attachXmlStrict(getBytes(), xml));
@@ -454,16 +491,73 @@ public class DocumentProxy {
     public Map<String, Integer> fixPdfa() throws IOException {
         ensuredDocument();
         Map<String, Integer> changes = PdfStandard.fixPdfaIssues(document);
-        if (!changes.isEmpty()) {
-            synchronized (this) {
-                for (Page p : pages) {
-                    p.image = null;
-                    p.scale = 0;
-                }
-            }
-            refirePages();
-        }
+        if (!changes.isEmpty())
+            redrawAllPages();
         return changes;
+    }
+
+    /**
+     * Incremented each time the content of the pages was changed in place (e.g. a font was replaced).
+     * A page rendered while this changes is rendered again, see {@link RenderQueue}.
+     */
+    private volatile int redrawGeneration;
+
+    public int getRedrawGeneration() {
+        return redrawGeneration;
+    }
+
+    /**
+     * Redraws all thumbnails after the content of the pages was changed in place.<br>
+     * The document caches the loaded fonts and other resources, so the cache is dropped too, otherwise the
+     * pages would be drawn with the old objects.
+     */
+    private void redrawAllPages() {
+        ++redrawGeneration;
+        document.setResourceCache(org.apache.pdfbox.pdmodel.ResourceCacheFactory.createResourceCache());
+        synchronized (this) {
+            for (Page p : pages) {
+                p.image = null;
+                p.scale = 0;
+            }
+        }
+        refirePages();
+    }
+
+    /**
+     * Lists the fonts of the effective document.
+     */
+    public List<PdfFonts.FontInfo> getFonts() {
+        ensuredDocument();
+        return PdfFonts.list(document);
+    }
+
+    /**
+     * Counts the fonts which exist more than once with the same content, see {@link PdfFontMerger}.
+     */
+    public PdfFontMerger.Result findDuplicateFonts() throws IOException {
+        ensuredDocument();
+        return PdfFontMerger.find(document);
+    }
+
+    /**
+     * Merges fonts which exist more than once with the same content, see {@link PdfFontMerger}.
+     * The pages look the same, so the thumbnails stay.
+     */
+    public PdfFontMerger.Result mergeDuplicateFonts() throws IOException {
+        ensuredDocument();
+        return PdfFontMerger.merge(document);
+    }
+
+    /**
+     * Replaces the font program of a font by a bundled font, see {@link PdfFontEmbedder#replace}.
+     * The thumbnails are redrawn.
+     *
+     * @param font The font dictionary, see {@link #getFonts}.
+     */
+    public void replaceFont(org.apache.pdfbox.cos.COSDictionary font, FontSource source) throws IOException {
+        ensuredDocument();
+        PdfFontEmbedder.replace(document, font, source);
+        redrawAllPages();
     }
 
     /**
@@ -578,8 +672,10 @@ public class DocumentProxy {
                                 Log.error("Both documents contain an invoice. Only the invoice of the first document is kept.");
                                 EInvoice.removeXml(document);
                             }
+                            final boolean tagged = PdfRisk.isTagged(this.getDocument()) || PdfRisk.isTagged(document);
                             PDFMergerUtility pdfMergerUtility = new PDFMergerUtility();
                             pdfMergerUtility.appendDocument(this.getDocument(), document);
+                            reportRisks("Merge", PdfRisk.tagsLost(tagged, this.getDocument()));
                         } catch (Exception e) {
                             Log.error("Failed to merge. %s", e.getMessage());
                             this.error = "Failed to merge: " + e.getMessage();

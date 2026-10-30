@@ -69,6 +69,46 @@ public final class Redactor {
     }
 
     /**
+     * Finds pages, where a text search can't work: they have (almost) no extractable text, e.g. scans.
+     *
+     * @param document The document.
+     * @return The 1-based numbers of the pages with less than a few characters.
+     */
+    public static List<Integer> pagesWithoutText(PDDocument document) throws IOException {
+        List<Integer> result = new ArrayList<>();
+        PDFTextStripper stripper = new PDFTextStripper();
+        for (int i = 1; i <= document.getNumberOfPages(); ++i) {
+            stripper.setStartPage(i);
+            stripper.setEndPage(i);
+            String text = stripper.getText(document);
+            if (text.codePoints().filter(c -> !Character.isWhitespace(c)).count() < MIN_TEXT_CHARS)
+                result.add(i);
+        }
+        return result;
+    }
+
+    private static final int MIN_TEXT_CHARS = 5;
+
+    /**
+     * Describes the result of {@link #pagesWithoutText} for the user.
+     *
+     * @return The warning or null if there is nothing to warn about.
+     */
+    public static String textSearchWarning(List<Integer> pages) {
+        if (pages.isEmpty())
+            return null;
+        StringBuilder s = new StringBuilder(pages.size() == 1 ? "Page " : "Pages ");
+        int shown = Math.min(pages.size(), 10);
+        for (int i = 0; i < shown; ++i)
+            s.append(i == 0 ? "" : ", ").append(pages.get(i));
+        if (shown < pages.size())
+            s.append(", … (").append(pages.size()).append(" in total)");
+        return s.append(pages.size() == 1 ? " has" : " have")
+                .append(" no extractable text (scan?). The text search finds nothing there,"
+                        + " mark such areas by hand.").toString();
+    }
+
+    /**
      * Converts a rectangle from the coordinates of the displayed (rotated) page to the unrotated page.
      * Both are in points with the origin in the upper left corner.
      *

@@ -2,11 +2,15 @@ package com.bw.jPdfTool.ui;
 
 
 
+import com.bw.jPdfTool.ui.fonts.ImportedFontsDialog;
+import com.bw.jPdfTool.ui.fonts.FontsDialog;
 import com.bw.jPdfTool.AboutInfo;
 import com.bw.jPdfTool.Manual;
 import com.bw.jPdfTool.DocumentInformation;
+import com.bw.jPdfTool.fonts.FontEmbedException;
 import com.bw.jPdfTool.invoice.EInvoice;
 import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.PdfRisk;
 import com.bw.jPdfTool.PdfStandard;
 import com.bw.jPdfTool.Main;
 import com.bw.jPdfTool.Preferences;
@@ -1110,6 +1114,7 @@ public class UI extends JSplitPane {
                 options.add(viewerQuality);
             }
             menuBar.add(options);
+            menuBar.add(createFontsMenu());
             menuBar.add(createInvoiceMenu());
             JMenu help = new JMenu("Help");
             JMenuItem manual = new JMenuItem("Manual");
@@ -1314,6 +1319,39 @@ public class UI extends JSplitPane {
     private static final String ATTACH_INVOICE = "Attach Invoice XML…";
     private static final String ATTACH_INVOICE_TOOLTIP =
             "Attaches a ZUGFeRD/Factur-X (CII) XML. An existing invoice is replaced.";
+
+    /**
+     * Creates the menu to show the fonts of the document and to replace them.
+     */
+    private JMenu createFontsMenu() {
+        JMenu menu = new JMenu("Fonts");
+        JMenuItem show = new JMenuItem("Show Fonts…");
+        show.setToolTipText("Lists the fonts of the document and replaces them by bundled fonts.");
+        show.addActionListener(e -> {
+            if (documentProxy != null && documentProxy.getDocument() != null)
+                FontsDialog.show(this, documentProxy);
+        });
+        menu.add(show);
+        JMenuItem imported = new JMenuItem("Imported Fonts…");
+        imported.setToolTipText("Font files of your own, which can replace the fonts of a document.");
+        imported.addActionListener(e -> ImportedFontsDialog.show(this));
+        menu.add(imported);
+        menu.addMenuListener(new MenuListener() {
+            @Override
+            public void menuSelected(MenuEvent e) {
+                show.setEnabled(documentProxy != null && documentProxy.getDocument() != null);
+            }
+
+            @Override
+            public void menuDeselected(MenuEvent e) {
+            }
+
+            @Override
+            public void menuCanceled(MenuEvent e) {
+            }
+        });
+        return menu;
+    }
 
     /**
      * Creates the menu with the e-invoice (ZUGFeRD/Factur-X) actions.
@@ -1590,6 +1628,8 @@ public class UI extends JSplitPane {
                         Splitter splitter = new Splitter();
                         splitter.setSplitAtPage(pagePerDocument);
                         List<PDDocument> splittedDocs = splitter.split(source);
+                        if (!splittedDocs.isEmpty())
+                            documentProxy.reportRisks("Split", PdfRisk.tagsLost(PdfRisk.isTagged(source), splittedDocs.get(0)));
                         for (PDDocument part : splittedDocs) {
                             PDDocument doc = part;
                             if (invoiceXml != null && fileCount == 0) {
@@ -1999,6 +2039,12 @@ public class UI extends JSplitPane {
             pdfaFromDocument = true;
             hadInvoice = false;
             documentProxy.pdfaFixListener = changes -> runOnEdt(() -> notifyPdfaFixes(changes));
+            documentProxy.riskListener = (fileName, risks) -> runOnEdt(() -> {
+                StringBuilder list = new StringBuilder();
+                risks.forEach(r -> list.append("&bull; ").append(r).append("<br>"));
+                toaster.toast(ToastType.WARNING, 15000,
+                        "<html><font size='+1'><b>%s</b></font><br>%s</html>", fileName, list);
+            });
             documentProxy.appendCheck = doc -> {
                 if (!pdfA3.isSelected() || PdfStandard.pdfaPart(doc) > 0)
                     return null;
@@ -2152,6 +2198,13 @@ public class UI extends JSplitPane {
                 var changes = documentProxy.fixPdfa();
                 if (!changes.isEmpty())
                     notifyPdfaFixes(changes);
+            } catch (FontEmbedException e) {
+                // PDF/A can't be kept: don't claim it. Unchecking calls this method again.
+                Log.error("PDF/A: %s", e.getMessage());
+                toaster.toast(ToastType.ERROR, 20000,
+                        "<html><font size='+1'><b>PDF/A-3 not possible</b></font><br>%s</html>", e.getMessage());
+                pdfA3.setSelected(false);
+                return;
             } catch (IOException e) {
                 Log.error("Failed to fix PDF/A issues: %s", e.getMessage());
             }
