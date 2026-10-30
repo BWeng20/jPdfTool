@@ -2,6 +2,7 @@ package com.bw.jPdfTool.ui.invoice;
 
 import com.bw.jPdfTool.invoice.InvoiceData;
 import com.bw.jPdfTool.invoice.Party;
+import com.bw.jPdfTool.invoice.PartyPresets;
 import com.bw.jPdfTool.invoice.Role;
 
 import javax.swing.DefaultListCellRenderer;
@@ -11,11 +12,15 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import java.awt.BorderLayout;
 import java.awt.Component;
+import java.awt.FlowLayout;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 /**
- * Combo box with the seller or buyer presets and a button to manage them.<br>
- * Choosing a preset copies its values into the target party.
+ * Combo box with the seller or buyer presets and buttons to take over changes and to manage them.<br>
+ * Choosing a preset copies its values into the target party. Editing the target never changes the selection.
  */
 class PresetChooser extends JPanel {
 
@@ -24,8 +29,16 @@ class PresetChooser extends JPanel {
      */
     private static final Party NO_PRESET = new Party();
 
+    /**
+     * All choosers, to fill them again when the presets were changed.
+     */
+    private static final Set<PresetChooser> INSTANCES = Collections.newSetFromMap(new WeakHashMap<>());
+
     private final Role role;
+    private final Party target;
     private final JComboBox<Party> combo = new JComboBox<>();
+    private final JButton update = new JButton();
+    private List<Party> presets = List.of();
     private boolean updating;
 
     /**
@@ -36,15 +49,16 @@ class PresetChooser extends JPanel {
     PresetChooser(Role role, Party target, Runnable onApplied) {
         super(new BorderLayout(6, 0));
         this.role = role;
+        this.target = target;
         combo.setRenderer(new DefaultListCellRenderer() {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
-                String text = value == NO_PRESET || value == null ? "—" : PartySettingsDialog.displayName((Party) value);
+                String text = value == NO_PRESET || value == null ? "-" : PartySettingsDialog.displayName((Party) value);
                 return super.getListCellRendererComponent(list, text, index, isSelected, cellHasFocus);
             }
         });
         combo.setToolTipText("Fills the " + role.title.toLowerCase() + " data from a preset.");
-        reload(target.name);
+        reload(PartyPresets.find(InvoiceData.loadParties(role), target, role));
         combo.addActionListener(e -> {
             if (updating)
                 return;
@@ -52,60 +66,115 @@ class PresetChooser extends JPanel {
                 target.copyFrom(preset);
                 onApplied.run();
             }
+            refreshButton();
         });
 
+        update.addActionListener(e -> edit(target));
         JButton manage = new JButton("Manage…");
         manage.setToolTipText("Add, change or remove the sellers and buyers.");
-        manage.addActionListener(e -> {
-            if (PartySettingsDialog.showDialog(this))
-                reload(getSelectedName());
-        });
+        manage.addActionListener(e -> edit(null));
+        INSTANCES.add(this);
 
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEADING, 6, 0));
+        buttons.add(update);
+        buttons.add(manage);
         add(combo, BorderLayout.CENTER);
-        add(manage, BorderLayout.EAST);
+        add(buttons, BorderLayout.EAST);
+        refreshButton();
     }
 
     /**
-     * Name of the selected preset, null if none is selected.
+     * Opens the parties, with the values of the proposal taken over if there is one.
+     * The presets changed, so all choosers (seller and buyer) are filled again.
      */
-    String getSelectedName() {
-        return combo.getSelectedItem() instanceof Party p && p != NO_PRESET ? p.name : null;
+    private void edit(Party proposal) {
+        PartySettingsDialog.Result r = PartySettingsDialog.showDialog(this, proposal, getSelected(), role);
+        if (!r.saved())
+            return;
+        for (PresetChooser c : List.copyOf(INSTANCES))
+            c.reload(c == this && r.selected() != null && r.selected().hasRole(role) ? r.selected() : c.keepSelection());
+    }
+
+    /**
+     * The selected preset if the party still belongs to it, else the one that fits the party best.
+     * The selection comes from before the presets were changed, so the entry may have been renamed.
+     */
+    private Party keepSelection() {
+        return PartyPresets.find(InvoiceData.loadParties(role), target, role);
+    }
+
+    /**
+     * The selected preset, null if none is selected.
+     */
+    Party getSelected() {
+        return combo.getSelectedItem() instanceof Party p && p != NO_PRESET ? p : null;
+    }
+
+    /**
+     * Name and label of the selected preset, null if none is selected.
+     */
+    String getSelectedKey() {
+        Party p = getSelected();
+        return p == null ? null : key(p);
+    }
+
+    /**
+     * Shows if the changes of the target update a preset or create a new one.
+     * Called after the target was edited. The selection of the combo box stays as it is.
+     */
+    void refreshButton() {
+        Party p = getSelected();
+        if (p == null)
+            p = Party.findBestMatch(presets, target, role);
+        boolean exists = p != null;
+        update.setText(exists ? "Update…" : "Create…");
+        update.setToolTipText(exists
+                ? "Opens the parties to take over the changes into \"" + PartySettingsDialog.displayName(p) + "\"."
+                : "Opens the parties to add this " + role.title.toLowerCase() + " as a new entry.");
     }
 
     /**
      * Fills the combo box again, without changing the target.
      *
-     * @param selectName Name of the preset to select, null for none.
+     * @param select Preset to select (matched by name and label), null for none.
      */
-    private void reload(String selectName) {
+    private void reload(Party select) {
         updating = true;
         try {
+            presets = InvoiceData.loadParties(role);
             combo.removeAllItems();
             combo.addItem(NO_PRESET);
             Party selected = NO_PRESET;
-            for (Party p : InvoiceData.loadParties(role)) {
+            for (Party p : presets) {
                 combo.addItem(p);
-                if (selected == NO_PRESET && sameName(p.name, selectName))
+                if (selected == NO_PRESET && select != null && p.sameIdentity(select))
                     selected = p;
             }
             combo.setSelectedItem(selected);
         } finally {
             updating = false;
         }
-    }
-
-    static boolean sameName(String a, String b) {
-        return a != null && b != null && !a.isBlank() && a.trim().equalsIgnoreCase(b.trim());
+        refreshButton();
     }
 
     /**
-     * Finds the preset with this name.
+     * Text to remember a preset: name and label.
+     */
+    static String key(Party p) {
+        return p.displayName();
+    }
+
+    /**
+     * Finds the preset with this key, or the first one with this name.
      *
      * @return The preset or null.
      */
-    static Party find(List<Party> presets, String name) {
+    static Party find(List<Party> presets, String key) {
         for (Party p : presets)
-            if (sameName(p.name, name))
+            if (key(p).equalsIgnoreCase(key == null ? "" : key.trim()))
+                return p;
+        for (Party p : presets)
+            if (Party.sameName(p.name, key))
                 return p;
         return null;
     }

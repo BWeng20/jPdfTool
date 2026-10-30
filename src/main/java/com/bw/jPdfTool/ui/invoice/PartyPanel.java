@@ -28,7 +28,9 @@ class PartyPanel extends FormPanel {
 
     private final List<Binding> bindings = new ArrayList<>();
     private final JTextField nameField;
+    private JTextField labelField;
     private Party party;
+    private Party baseline;
     private Runnable onChange;
     private boolean updating;
     private Predicate<InvoiceData.Field> supported = f -> true;
@@ -39,8 +41,20 @@ class PartyPanel extends FormPanel {
      * @param header        Optional component shown in the first row, e.g. the preset chooser of the editor.
      */
     PartyPanel(boolean seller, String headerCaption, JComponent header) {
+        this(seller, headerCaption, header, false);
+    }
+
+    /**
+     * @param withLabel True to show the label of a preset, which tells apart versions of the same party.
+     */
+    PartyPanel(boolean seller, String headerCaption, JComponent header, boolean withLabel) {
         if (header != null)
             row(headerCaption, header);
+        if (withLabel) {
+            labelField = field(null, 14, "Tells apart several versions of the same party, e.g. \"Berlin branch\".",
+                    p -> p.label, (p, v) -> p.label = v);
+            row("Label", labelField);
+        }
         InvoiceData.Field address = seller ? InvoiceData.Field.SELLER_ADDRESS : InvoiceData.Field.BUYER_DETAILS;
         InvoiceData.Field details = seller ? null : InvoiceData.Field.BUYER_DETAILS;
         InvoiceData.Field email = seller ? InvoiceData.Field.SELLER_EMAIL : InvoiceData.Field.BUYER_DETAILS;
@@ -67,7 +81,22 @@ class PartyPanel extends FormPanel {
         } else {
             row("E-mail", field(email, 14, null, p -> p.email, (p, v) -> p.email = v));
         }
+        if (withLabel) {
+            section("Payment as buyer");
+            row("Terms", field(null, 14, "Default payment terms of a new invoice to this buyer.",
+                    p -> p.paymentTerms, (p, v) -> p.paymentTerms = v));
+            row("Days until due", field(null, 6, "Days after the invoice date: sets the due date of a new invoice to this buyer.",
+                    p -> p.paymentDays == null ? null : String.valueOf(p.paymentDays), (p, v) -> p.paymentDays = parseDays(v)));
+        }
         setParty(null);
+    }
+
+    /**
+     * @return The number of days, null if the text is no number from 0 to 9999.
+     */
+    private static Integer parseDays(String text) {
+        String t = text == null ? "" : text.trim();
+        return t.matches("\\d{1,4}") ? Integer.valueOf(t) : null;
     }
 
     /**
@@ -79,6 +108,13 @@ class PartyPanel extends FormPanel {
 
     JTextField getNameField() {
         return nameField;
+    }
+
+    /**
+     * The label field, null if the panel was created without one.
+     */
+    JTextField getLabelField() {
+        return labelField;
     }
 
     /**
@@ -98,6 +134,20 @@ class PartyPanel extends FormPanel {
     }
 
     /**
+     * The values to compare with: fields that differ get marked. Null marks nothing.
+     */
+    void setBaseline(Party baseline) {
+        this.baseline = baseline;
+        bindings.forEach(this::mark);
+    }
+
+    private void mark(Binding b) {
+        boolean modified = party != null && baseline != null
+                && !Outline.same(b.getter.apply(party), b.getter.apply(baseline));
+        Outline.apply(b.field, false, modified);
+    }
+
+    /**
      * Shows the values of the party again, e.g. after it was changed from outside.
      */
     void reload() {
@@ -111,6 +161,7 @@ class PartyPanel extends FormPanel {
         } finally {
             updating = false;
         }
+        bindings.forEach(this::mark);
         updateEnabled();
     }
 
@@ -151,6 +202,7 @@ class PartyPanel extends FormPanel {
             return;
         String v = b.field.getText();
         b.setter.accept(party, v.isBlank() ? null : v);
+        mark(b);
         if (onChange != null)
             onChange.run();
     }

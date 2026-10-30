@@ -2,6 +2,8 @@ package com.bw.jPdfTool.ui;
 
 
 
+import com.bw.jPdfTool.AboutInfo;
+import com.bw.jPdfTool.Manual;
 import com.bw.jPdfTool.DocumentInformation;
 import com.bw.jPdfTool.invoice.EInvoice;
 import com.bw.jPdfTool.Log;
@@ -1109,6 +1111,16 @@ public class UI extends JSplitPane {
             }
             menuBar.add(options);
             menuBar.add(createInvoiceMenu());
+            JMenu help = new JMenu("Help");
+            JMenuItem manual = new JMenuItem("Manual");
+            manual.setToolTipText("Opens the README as PDF.");
+            manual.addActionListener(e -> openManual());
+            help.add(manual);
+            help.addSeparator();
+            JMenuItem about = new JMenuItem("About " + AboutInfo.NAME + "…");
+            about.addActionListener(e -> AboutDialog.show(this));
+            help.add(about);
+            menuBar.add(help);
         }
 
         LookAndFeel currentLaf = UIManager.getLookAndFeel();
@@ -1986,6 +1998,7 @@ public class UI extends JSplitPane {
             documentProxy = new DocumentProxy(renderQueue);
             pdfaFromDocument = true;
             hadInvoice = false;
+            documentProxy.pdfaFixListener = changes -> runOnEdt(() -> notifyPdfaFixes(changes));
             documentProxy.appendCheck = doc -> {
                 if (!pdfA3.isSelected() || PdfStandard.pdfaPart(doc) > 0)
                     return null;
@@ -2134,18 +2147,57 @@ public class UI extends JSplitPane {
 
         boolean hasDocument = documentProxy != null && documentProxy.getDocument() != null;
         if (pdfa && hasDocument) {
-            // PDF/A needs an RGB output intent for the images of "To Image" and redaction.
+            // PDF/A needs an RGB output intent for the images of "To Image" and redaction, and forbids some features.
             try {
-                if (PdfStandard.addSrgbOutputIntent(documentProxy.getDocument()))
-                    Log.info("Added sRGB output intent for PDF/A-3.");
+                var changes = documentProxy.fixPdfa();
+                if (!changes.isEmpty())
+                    notifyPdfaFixes(changes);
             } catch (IOException e) {
-                Log.error("Failed to add sRGB output intent: %s", e.getMessage());
+                Log.error("Failed to fix PDF/A issues: %s", e.getMessage());
             }
         }
         splitDocument.setEnabled(hasDocument && !pdfa);
         splitDocument.setToolTipText(pdfa ? "<html>Not allowed for PDF/A-3: the parts lose the PDF/A metadata.</html>" : null);
 
         updatePermissions();
+    }
+
+    /**
+     * Tells the user that the document was changed to be PDF/A-3 conform.
+     */
+    private void notifyPdfaFixes(java.util.Map<String, Integer> changes) {
+        StringBuilder list = new StringBuilder();
+        changes.forEach((what, times) -> list.append("&bull; ").append(what).append(" (").append(times).append("x)<br>"));
+        final String message = "<html><font size='+1'><b>Document changed for PDF/A-3</b></font><br>"
+                + list
+                + "Reload the file to get the original.</html>";
+        toaster.toast(ToastType.INFO, 10000, message);
+        if (!GraphicsEnvironment.isHeadless())
+            // Later: this may be called while a document is loading.
+            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, message, "PDF/A-3",
+                    JOptionPane.INFORMATION_MESSAGE));
+    }
+
+    /**
+     * Opens the manual (the README as PDF, which lies beside the jar) in the PDF viewer of the system.
+     */
+    private void openManual() {
+        java.nio.file.Path pdf = Manual.find();
+        if (pdf == null) {
+            toaster.toast(ToastType.ERROR, 10000, "<html><font size='+1'><b>Manual not found</b></font><br>"
+                    + "The file <i>manual.pdf</i> is missing beside the program.</html>");
+            return;
+        }
+        try {
+            Desktop desktop = Desktop.isDesktopSupported() ? Desktop.getDesktop() : null;
+            if (desktop != null && desktop.isSupported(Desktop.Action.OPEN)) {
+                desktop.open(pdf.toFile());
+            } else {
+                toaster.toast(ToastType.INFO, 10000, "<html>Can't open a viewer. The manual is the file<br><i>%s</i></html>", pdf);
+            }
+        } catch (Exception e) {
+            toaster.toast(ToastType.ERROR, 10000, "<html>Failed to open the manual:<br>%s</html>", e.getMessage());
+        }
     }
 
     /**

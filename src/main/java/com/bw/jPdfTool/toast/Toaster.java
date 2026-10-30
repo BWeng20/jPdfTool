@@ -68,6 +68,8 @@ public class Toaster {
                 message = String.format(message, arguments);
 
             toasts[0] = new Toast(type, durationMS, message, () -> removeNotification(toasts[0]), 300);
+            // A new component sits at (0,0) until the fade-in runs, which showed the toast in the upper left corner.
+            toasts[0].setLocation(layeredPane.getWidth(), layeredPane.getHeight());
             layeredPane.add(toasts[0], JLayeredPane.POPUP_LAYER);
             bread.add(0, toasts[0]);
             SwingUtilities.invokeLater(() -> {

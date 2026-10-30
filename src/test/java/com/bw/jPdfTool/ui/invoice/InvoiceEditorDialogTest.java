@@ -4,33 +4,9 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.util.Locale;
 
 class InvoiceEditorDialogTest {
-
-    @Test
-    void parseDate() {
-        var de = InvoiceEditorDialog.dateFormatter(Locale.GERMANY, true);
-        LocalDate expected = LocalDate.of(2024, 10, 1);
-        Assertions.assertEquals(expected, InvoiceEditorDialog.parseDate("01.10.2024", de));
-        Assertions.assertEquals(expected, InvoiceEditorDialog.parseDate("1.10.2024", de));
-        Assertions.assertEquals(expected, InvoiceEditorDialog.parseDate("2024-10-01", de), "ISO always works");
-        Assertions.assertEquals(expected, InvoiceEditorDialog.parseDate("20241001", de));
-        Assertions.assertNull(InvoiceEditorDialog.parseDate("32.10.2024", de));
-        Assertions.assertNull(InvoiceEditorDialog.parseDate("tomorrow", de));
-
-        var us = InvoiceEditorDialog.dateFormatter(Locale.US, true);
-        Assertions.assertEquals(expected, InvoiceEditorDialog.parseDate("10/1/2024", us));
-    }
-
-    @Test
-    void displayDate() {
-        LocalDate d = LocalDate.of(2024, 10, 1);
-        Assertions.assertEquals("01.10.2024", InvoiceEditorDialog.dateFormatter(Locale.GERMANY, false).format(d));
-        Assertions.assertEquals("10/1/2024", InvoiceEditorDialog.dateFormatter(Locale.US, false).format(d));
-        Assertions.assertEquals("dd.MM.yyyy", InvoiceEditorDialog.datePattern(Locale.GERMANY));
-    }
 
     @Test
     void parseDecimal() {

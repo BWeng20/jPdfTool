@@ -58,16 +58,13 @@ import java.text.DecimalFormat;
 import java.text.NumberFormat;
 import java.text.ParsePosition;
 import java.time.LocalDate;
-import java.time.chrono.IsoChronology;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeFormatterBuilder;
-import java.time.format.FormatStyle;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -121,8 +118,6 @@ public class InvoiceEditorDialog extends JDialog {
     private final InvoiceData data;
     private final DocumentProxy proxy;
     private final Locale locale = Locale.getDefault();
-    private final DateTimeFormatter dateDisplay = dateFormatter(locale, false);
-    private final DateTimeFormatter dateParse = dateFormatter(locale, true);
 
     /**
      * Fields with input that can't be parsed, with the reason.
@@ -153,6 +148,41 @@ public class InvoiceEditorDialog extends JDialog {
     private final List<Runnable> profileUpdaters = new ArrayList<>();
     private final XmlFieldsPanel xmlFields;
     private boolean reloading;
+
+    /**
+     * A field and how to read its value, to mark it if the value differs from the one when the editor was opened.
+     */
+    private static final class Tracked {
+        final JComponent field;
+        final Supplier<?> current;
+        Object original;
+
+        Tracked(JComponent field, Supplier<?> current) {
+            this.field = field;
+            this.current = current;
+        }
+
+        void mark() {
+            boolean modified = !Outline.same(current.get(), original);
+            if (field instanceof DateField d)
+                d.setModified(modified);
+            else
+                Outline.apply(field, false, modified);
+        }
+    }
+
+    private final List<Tracked> tracked = new ArrayList<>();
+    /**
+     * Items and amounts as they were when the editor was opened.
+     */
+    private final List<InvoiceData.Line> originalLines = new ArrayList<>();
+    private final List<InvoiceData.VatAmount> originalAmounts = new ArrayList<>();
+    /**
+     * For each row of the items and amounts the original, null for a new row. Parallel to the lists of the data.
+     */
+    private final List<InvoiceData.Line> lineOrigins = new ArrayList<>();
+    private final List<InvoiceData.VatAmount> amountOrigins = new ArrayList<>();
+    private boolean originalsKnown;
 
     private boolean dirty;
     private boolean working;
@@ -215,6 +245,7 @@ public class InvoiceEditorDialog extends JDialog {
         update();
         // Filling the fields is no change by the user.
         dirty = false;
+        captureOriginals();
         pack();
         setMinimumSize(new Dimension(520, 480));
     }
@@ -271,6 +302,8 @@ public class InvoiceEditorDialog extends JDialog {
                 "Currency", text(() -> data.currency, 4, v -> data.currency = v));
         f.row("Issue date", date(() -> data.issueDate, v -> data.issueDate = v, "Issue date"),
                 "Delivery date", restrict(date(() -> data.deliveryDate, v -> data.deliveryDate = v, "Delivery date"), InvoiceData.Field.DELIVERY_DATE));
+        f.row("Service from", restrict(date(() -> data.periodStart, v -> data.periodStart = v, "Period start"), InvoiceData.Field.PERIOD),
+                "Service to", restrict(date(() -> data.periodEnd, v -> data.periodEnd = v, "Period end"), InvoiceData.Field.PERIOD));
         JTextField reference = text(() -> data.buyerReference, 14, v -> data.buyerReference = v);
         reference.setToolTipText("Reference of the buyer, e.g. an order number. For XRechnung the Leitweg-ID.");
         f.row("Buyer reference", reference);
@@ -300,7 +333,7 @@ public class InvoiceEditorDialog extends JDialog {
      */
     private JComboBox<String> codeCombo(Map<String, String> names, Supplier<String> getter, Consumer<String> setter,
                                         java.util.function.Function<String, String> unknownName) {
-        JComboBox<String> combo = new JComboBox<>();
+        JComboBox<String> combo = track(new JComboBox<>(), getter);
         combo.setRenderer(new DefaultListCellRenderer() {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
@@ -334,11 +367,18 @@ public class InvoiceEditorDialog extends JDialog {
         PartyPanel[] panel = new PartyPanel[1];
         PresetChooser chooser = new PresetChooser(role, party, () -> {
             panel[0].reload();
+            // A buyer may bring payment terms for the fields of the invoice that are still empty.
+            if (role == Role.BUYER && data.applyBuyerPaymentDefaults())
+                reloadForm();
             changed();
         });
         panel[0] = new PartyPanel(role == Role.SELLER, "Preset", chooser);
         panel[0].setParty(party);
-        panel[0].setOnChange(this::changed);
+        panel[0].setBaseline(party.copy());
+        panel[0].setOnChange(() -> {
+            chooser.refreshButton();
+            changed();
+        });
         partyPanels.add(panel[0]);
         profileUpdaters.add(() -> panel[0].setSupported(data::supports));
         if (role == Role.SELLER)
@@ -362,14 +402,14 @@ public class InvoiceEditorDialog extends JDialog {
      * Remembers the selected seller preset for the next new invoice.
      */
     private void rememberPreset() {
-        String name = sellerPresets == null ? null : sellerPresets.getSelectedName();
-        if (name != null)
-            Preferences.getInstance().set(PREF_LAST_SELLER, name.trim());
+        String key = sellerPresets == null ? null : sellerPresets.getSelectedKey();
+        if (key != null)
+            Preferences.getInstance().set(PREF_LAST_SELLER, key.trim());
     }
 
     private JComponent createPaymentTab() {
         FormPanel f = new FormPanel();
-        f.row("Due date", restrict(date(() -> data.dueDate, v -> data.dueDate = v, "Due date"), InvoiceData.Field.PAYMENT));
+        f.compactRow("Due date", restrict(date(() -> data.dueDate, v -> data.dueDate = v, "Due date"), InvoiceData.Field.PAYMENT));
         f.row("Payment terms", restrict(text(() -> data.paymentTerms, 14, v -> data.paymentTerms = v), InvoiceData.Field.PAYMENT));
         JLabel hint = new JLabel("The bank account is part of the seller data.");
         hint.setForeground(UIManager.getColor("Label.disabledForeground"));
@@ -386,14 +426,15 @@ public class InvoiceEditorDialog extends JDialog {
         table.setFillsViewportHeight(true);
         table.getTableHeader().setReorderingAllowed(false);
 
-        DecimalRenderer decimal = new DecimalRenderer(0);
-        DecimalRenderer money = new DecimalRenderer(2);
+        DecimalRenderer decimal = new DecimalRenderer(0, this::lineModified);
+        DecimalRenderer money = new DecimalRenderer(2, this::lineModified);
+        table.getColumnModel().getColumn(COL_NAME).setCellRenderer(new MarkingRenderer(this::lineModified));
         table.getColumnModel().getColumn(COL_QUANTITY).setCellRenderer(decimal);
         table.getColumnModel().getColumn(COL_VAT).setCellRenderer(decimal);
         table.getColumnModel().getColumn(COL_PRICE).setCellRenderer(money);
         table.getColumnModel().getColumn(COL_TOTAL).setCellRenderer(money);
         for (int c : new int[]{COL_QUANTITY, COL_PRICE, COL_VAT})
-            table.getColumnModel().getColumn(c).setCellEditor(new DecimalEditor());
+            table.getColumnModel().getColumn(c).setCellEditor(new DecimalEditor(this::lineModified));
 
         JComboBox<String> units = new JComboBox<>(UNITS.keySet().toArray(new String[0]));
         units.setEditable(true);
@@ -415,7 +456,7 @@ public class InvoiceEditorDialog extends JDialog {
                 return (idx < 0 ? s : s.substring(0, idx)).toUpperCase(Locale.ROOT);
             }
         });
-        table.getColumnModel().getColumn(COL_UNIT).setCellRenderer(new DefaultTableCellRenderer() {
+        table.getColumnModel().getColumn(COL_UNIT).setCellRenderer(new MarkingRenderer(this::lineModified) {
             @Override
             public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
                 return super.getTableCellRendererComponent(table, unitText(value), isSelected, hasFocus, row, column);
@@ -435,6 +476,7 @@ public class InvoiceEditorDialog extends JDialog {
         add.addActionListener(e -> {
             stopEditing();
             data.lines.add(newLine(data));
+            lineOrigins.add(null);
             int row = data.lines.size() - 1;
             lineModel.fireTableRowsInserted(row, row);
             table.changeSelection(row, COL_NAME, false, false);
@@ -451,8 +493,11 @@ public class InvoiceEditorDialog extends JDialog {
             if (table.isEditing())
                 table.getCellEditor().cancelCellEditing();
             int[] rows = table.getSelectedRows();
-            for (int i = rows.length - 1; i >= 0; --i)
+            for (int i = rows.length - 1; i >= 0; --i) {
                 data.lines.remove(rows[i]);
+                if (rows[i] < lineOrigins.size())
+                    lineOrigins.remove(rows[i]);
+            }
             lineModel.fireTableDataChanged();
             changed();
         });
@@ -513,12 +558,12 @@ public class InvoiceEditorDialog extends JDialog {
         amountTable.setFillsViewportHeight(true);
         amountTable.getTableHeader().setReorderingAllowed(false);
         amountTable.setRowHeight(table.getRowHeight());
-        DecimalRenderer money = new DecimalRenderer(2);
+        DecimalRenderer money = new DecimalRenderer(2, this::amountModified);
         amountTable.getColumnModel().getColumn(COL_AMOUNT_NET).setCellRenderer(money);
-        amountTable.getColumnModel().getColumn(COL_AMOUNT_RATE).setCellRenderer(new DecimalRenderer(0));
+        amountTable.getColumnModel().getColumn(COL_AMOUNT_RATE).setCellRenderer(new DecimalRenderer(0, this::amountModified));
         amountTable.getColumnModel().getColumn(COL_AMOUNT_VAT).setCellRenderer(money);
         for (int c : new int[]{COL_AMOUNT_NET, COL_AMOUNT_RATE})
-            amountTable.getColumnModel().getColumn(c).setCellEditor(new DecimalEditor());
+            amountTable.getColumnModel().getColumn(c).setCellEditor(new DecimalEditor(this::amountModified));
         JScrollPane scroll = new JScrollPane(amountTable);
         scroll.setPreferredSize(new Dimension(59 * em, table.getRowHeight() * 7 + amountTable.getTableHeader().getPreferredSize().height));
 
@@ -529,6 +574,7 @@ public class InvoiceEditorDialog extends JDialog {
             InvoiceData.VatAmount a = new InvoiceData.VatAmount();
             a.vatPercent = data.vatAmounts.isEmpty() ? new BigDecimal("19") : data.vatAmounts.get(data.vatAmounts.size() - 1).vatPercent;
             data.vatAmounts.add(a);
+            amountOrigins.add(null);
             int row = data.vatAmounts.size() - 1;
             amountModel.fireTableRowsInserted(row, row);
             amountTable.changeSelection(row, COL_AMOUNT_NET, false, false);
@@ -545,8 +591,11 @@ public class InvoiceEditorDialog extends JDialog {
             if (amountTable.isEditing())
                 amountTable.getCellEditor().cancelCellEditing();
             int[] rows = amountTable.getSelectedRows();
-            for (int i = rows.length - 1; i >= 0; --i)
+            for (int i = rows.length - 1; i >= 0; --i) {
                 data.vatAmounts.remove(rows[i]);
+                if (rows[i] < amountOrigins.size())
+                    amountOrigins.remove(rows[i]);
+            }
             amountModel.fireTableDataChanged();
             changed();
         });
@@ -747,10 +796,30 @@ public class InvoiceEditorDialog extends JDialog {
         }
     }
 
-    private class DecimalRenderer extends DefaultTableCellRenderer {
+    /**
+     * Cell renderer that draws a border around modified cells.
+     */
+    private static class MarkingRenderer extends DefaultTableCellRenderer {
+        private final BiPredicate<Integer, Integer> modified;
+
+        MarkingRenderer(BiPredicate<Integer, Integer> modified) {
+            this.modified = modified;
+        }
+
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+            if (modified.test(row, column))
+                setBorder(Outline.cellBorder(getBorder(), this));
+            return this;
+        }
+    }
+
+    private class DecimalRenderer extends MarkingRenderer {
         private final int minFraction;
 
-        DecimalRenderer(int minFraction) {
+        DecimalRenderer(int minFraction, BiPredicate<Integer, Integer> modified) {
+            super(modified);
             this.minFraction = minFraction;
             setHorizontalAlignment(SwingConstants.RIGHT);
         }
@@ -766,9 +835,11 @@ public class InvoiceEditorDialog extends JDialog {
      */
     private class DecimalEditor extends DefaultCellEditor {
         private final JTextField field;
+        private final BiPredicate<Integer, Integer> modified;
 
-        DecimalEditor() {
+        DecimalEditor(BiPredicate<Integer, Integer> modified) {
             super(new JTextField());
+            this.modified = modified;
             field = (JTextField) getComponent();
             field.setHorizontalAlignment(SwingConstants.RIGHT);
             setClickCountToStart(1);
@@ -778,7 +849,7 @@ public class InvoiceEditorDialog extends JDialog {
         public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected, int row, int column) {
             super.getTableCellEditorComponent(table, value, isSelected, row, column);
             field.setText(value instanceof BigDecimal d ? formatDecimal(d, 0, locale) : "");
-            field.putClientProperty("JComponent.outline", null);
+            Outline.apply(field, false, modified.test(row, column));
             return field;
         }
 
@@ -839,6 +910,83 @@ public class InvoiceEditorDialog extends JDialog {
     private void changed() {
         dirty = true;
         updateTimer.restart();
+        markModified();
+    }
+
+    /**
+     * Remembers the values shown now as the original ones. Later changes are marked, also after loading an XML file.
+     */
+    private void captureOriginals() {
+        tracked.forEach(t -> t.original = t.current.get());
+        originalLines.clear();
+        for (InvoiceData.Line l : data.lines)
+            originalLines.add(new InvoiceData.Line(l.name, l.quantity, l.unit, l.price, l.vatPercent));
+        originalAmounts.clear();
+        for (InvoiceData.VatAmount a : data.vatAmounts) {
+            InvoiceData.VatAmount c = new InvoiceData.VatAmount();
+            c.net = a.net;
+            c.vatPercent = a.vatPercent;
+            originalAmounts.add(c);
+        }
+        originalsKnown = true;
+        assignOrigins();
+        xmlFields.captureOriginals();
+        markModified();
+    }
+
+    /**
+     * Matches the rows to the original ones by position. Used when the rows were created again from the XML.
+     */
+    private void assignOrigins() {
+        lineOrigins.clear();
+        for (int i = 0; i < data.lines.size(); i++)
+            lineOrigins.add(i < originalLines.size() ? originalLines.get(i) : null);
+        amountOrigins.clear();
+        for (int i = 0; i < data.vatAmounts.size(); i++)
+            amountOrigins.add(i < originalAmounts.size() ? originalAmounts.get(i) : null);
+    }
+
+    private void markModified() {
+        if (!originalsKnown)
+            return;
+        tracked.forEach(Tracked::mark);
+        table.repaint();
+        amountTable.repaint();
+    }
+
+    /**
+     * Checks if a cell of the items differs from the original. All editable cells of a new item are modified.
+     */
+    private boolean lineModified(int row, int column) {
+        if (!originalsKnown || column == COL_TOTAL || row < 0 || row >= data.lines.size())
+            return false;
+        InvoiceData.Line l = data.lines.get(row);
+        InvoiceData.Line o = row < lineOrigins.size() ? lineOrigins.get(row) : null;
+        if (o == null)
+            return true;
+        return !Outline.same(switch (column) {
+            case COL_NAME -> l.name;
+            case COL_QUANTITY -> l.quantity;
+            case COL_UNIT -> l.unit;
+            case COL_PRICE -> l.price;
+            default -> l.vatPercent;
+        }, switch (column) {
+            case COL_NAME -> o.name;
+            case COL_QUANTITY -> o.quantity;
+            case COL_UNIT -> o.unit;
+            case COL_PRICE -> o.price;
+            default -> o.vatPercent;
+        });
+    }
+
+    private boolean amountModified(int row, int column) {
+        if (!originalsKnown || column == COL_AMOUNT_VAT || row < 0 || row >= data.vatAmounts.size())
+            return false;
+        InvoiceData.VatAmount a = data.vatAmounts.get(row);
+        InvoiceData.VatAmount o = row < amountOrigins.size() ? amountOrigins.get(row) : null;
+        if (o == null)
+            return true;
+        return column == COL_AMOUNT_NET ? !Outline.same(a.net, o.net) : !Outline.same(a.vatPercent, o.vatPercent);
     }
 
     /**
@@ -866,9 +1014,16 @@ public class InvoiceEditorDialog extends JDialog {
             return;
         List<String> p = problems();
         if (p.isEmpty()) {
-            status.setIcon(null);
-            status.setText("Ready to attach.");
-            status.setToolTipText(null);
+            List<String> hints = data.hints();
+            if (hints.isEmpty()) {
+                status.setIcon(null);
+                status.setText("Ready to attach.");
+                status.setToolTipText(null);
+            } else {
+                status.setIcon(smallWarning());
+                status.setText("Ready to attach. Note: " + hints.get(0) + (hints.size() > 1 ? "  (+" + (hints.size() - 1) + " more)" : ""));
+                status.setToolTipText("<html>" + String.join("<br>", hints.stream().map(InvoiceEditorDialog::escape).toList()) + "</html>");
+            }
         } else {
             status.setIcon(smallWarning());
             status.setText(p.get(0) + (p.size() > 1 ? "  (+" + (p.size() - 1) + " more)" : ""));
@@ -1068,10 +1223,22 @@ public class InvoiceEditorDialog extends JDialog {
         } finally {
             reloading = false;
         }
+        // The rows may be new objects now.
+        if (originalsKnown)
+            assignOrigins();
+        markModified();
+    }
+
+    /**
+     * Marks the field while its value differs from the one when the editor was opened.
+     */
+    private <T extends JComponent> T track(T field, Supplier<?> current) {
+        tracked.add(new Tracked(field, current));
+        return field;
     }
 
     private JTextField text(Supplier<String> getter, int columns, Consumer<String> setter) {
-        JTextField f = new JTextField(columns);
+        JTextField f = track(new JTextField(columns), getter);
         reloaders.add(() -> {
             String v = getter.get();
             f.setText(v == null ? "" : v);
@@ -1086,28 +1253,22 @@ public class InvoiceEditorDialog extends JDialog {
         return f;
     }
 
-    private JTextField date(Supplier<LocalDate> getter, Consumer<LocalDate> setter, String caption) {
-        JTextField f = new JTextField(10);
-        f.putClientProperty("JTextField.placeholderText", datePattern(locale));
+    private DateField date(Supplier<LocalDate> getter, Consumer<LocalDate> setter, String caption) {
+        DateField f = track(new DateField(locale), getter);
         reloaders.add(() -> {
-            LocalDate v = getter.get();
-            f.setText(v == null ? "" : dateDisplay.format(v));
+            f.setDate(getter.get());
             invalid.remove(f);
-            f.putClientProperty("JComponent.outline", null);
         });
-        onChange(f, () -> {
-            if (reloading)
+        f.addChangeListener(() -> {
+            if (reloading) {
                 return;
-            String t = f.getText().trim();
-            LocalDate d = t.isEmpty() ? null : parseDate(t, dateParse);
-            if (!t.isEmpty() && d == null) {
-                invalid.put(f, caption + " is no valid date (" + datePattern(locale) + ").");
-                f.putClientProperty("JComponent.outline", "error");
-            } else {
-                invalid.remove(f);
-                f.putClientProperty("JComponent.outline", null);
             }
-            setter.accept(d);
+            if (f.isInputValid()) {
+                invalid.remove(f);
+            } else {
+                invalid.put(f, caption + " is no valid date (" + DateField.pattern(locale) + ").");
+            }
+            setter.accept(f.getDate());
             changed();
         });
         return f;
@@ -1133,44 +1294,6 @@ public class InvoiceEditorDialog extends JDialog {
     }
 
     // ---------------------------------------------------------------- parsing and formatting
-
-    /**
-     * Date format of the locale with a four-digit year, e.g. "dd.MM.yyyy" in Germany.
-     *
-     * @param forParsing If true, day and month may have one or two digits.
-     */
-    static DateTimeFormatter dateFormatter(Locale locale, boolean forParsing) {
-        String pattern = DateTimeFormatterBuilder.getLocalizedDateTimePattern(FormatStyle.SHORT, null,
-                IsoChronology.INSTANCE, locale).replaceAll("y+", "yyyy");
-        if (forParsing)
-            pattern = pattern.replaceAll("d+", "d").replaceAll("M+", "M");
-        return DateTimeFormatter.ofPattern(pattern, locale);
-    }
-
-    /**
-     * Readable date pattern for the locale, e.g. "dd.MM.yyyy".
-     */
-    static String datePattern(Locale locale) {
-        return DateTimeFormatterBuilder.getLocalizedDateTimePattern(FormatStyle.SHORT, null,
-                IsoChronology.INSTANCE, locale).replaceAll("y+", "yyyy");
-    }
-
-    /**
-     * Parses a date in the format of the locale or as ISO date ("2024-10-01" or "20241001").
-     *
-     * @return The date or null if it can't be parsed.
-     */
-    static LocalDate parseDate(String text, DateTimeFormatter localFormat) {
-        String t = text.trim();
-        for (DateTimeFormatter f : new DateTimeFormatter[]{localFormat, DateTimeFormatter.ISO_LOCAL_DATE, DateTimeFormatter.BASIC_ISO_DATE}) {
-            try {
-                return LocalDate.parse(t, f);
-            } catch (Exception ignored) {
-                // try next
-            }
-        }
-        return null;
-    }
 
     /**
      * Parses a number in the format of the locale (without grouping) or with "." as decimal separator.

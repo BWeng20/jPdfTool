@@ -3,6 +3,7 @@ package com.bw.jPdfTool.ui.invoice;
 import com.bw.jPdfTool.Log;
 import com.bw.jPdfTool.invoice.InvoiceData;
 import com.bw.jPdfTool.invoice.Party;
+import com.bw.jPdfTool.invoice.PartyPresets;
 import com.bw.jPdfTool.invoice.Role;
 
 import javax.swing.BorderFactory;
@@ -37,6 +38,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -50,13 +52,28 @@ public class PartySettingsDialog extends JDialog {
     private static final String TITLE = "Invoice Parties";
 
     private final Path file;
+    /**
+     * Outcome of the dialog.
+     *
+     * @param saved    True if the presets were saved.
+     * @param selected The entry selected when saving, null if not saved or nothing selected.
+     */
+    public record Result(boolean saved, Party selected) {
+    }
+
     private final DefaultListModel<Party> model = new DefaultListModel<>();
     private final JList<Party> list = new JList<>(model);
     private final Map<Role, JCheckBox> roleBoxes = new EnumMap<>(Role.class);
     private final PartyPanel editor;
     private final JButton remove = new JButton("Remove");
+    private final JButton copy = new JButton("Create Copy");
+    /**
+     * The entries as loaded, to reset an entry when a copy is made from its edited values.
+     */
+    private final Map<Party, Party> originals = new IdentityHashMap<>();
 
     private boolean dirty;
+    private Party savedSelection;
     private boolean saved;
     private boolean updating;
 
@@ -64,7 +81,11 @@ public class PartySettingsDialog extends JDialog {
         super(owner, TITLE, Dialog.ModalityType.APPLICATION_MODAL);
         this.file = file;
         // Work on copies, "Cancel" leaves the presets untouched.
-        parties.forEach(s -> model.addElement(s.copy()));
+        for (Party s : parties) {
+            Party c = s.copy();
+            model.addElement(c);
+            originals.put(c, s.copy());
+        }
 
         JPanel roles = new JPanel(new FlowLayout(FlowLayout.LEADING, 0, 0));
         for (Role role : Role.values()) {
@@ -84,7 +105,7 @@ public class PartySettingsDialog extends JDialog {
             roles.add(box);
         }
         // Seller form: it has all fields, a buyer simply doesn't use contact and bank account.
-        editor = new PartyPanel(true, "Use as", roles);
+        editor = new PartyPanel(true, "Use as", roles, true);
 
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setCellRenderer(new DefaultListCellRenderer() {
@@ -111,13 +132,16 @@ public class PartySettingsDialog extends JDialog {
         JButton add = new JButton("Add");
         add.addActionListener(e -> addParty());
         remove.addActionListener(e -> removeParty());
-        JPanel listButtons = new JPanel(new GridLayout(1, 2, 6, 0));
+        copy.setToolTipText("Adds a copy with the current values and resets this entry to its saved values.");
+        copy.addActionListener(e -> createCopy());
+        JPanel listButtons = new JPanel(new GridLayout(1, 3, 6, 0));
         listButtons.add(add);
+        listButtons.add(copy);
         listButtons.add(remove);
 
         JScrollPane listScroll = new JScrollPane(list);
         int em = list.getFontMetrics(list.getFont()).charWidth('m');
-        listScroll.setPreferredSize(new Dimension(18 * em, 10));
+        listScroll.setPreferredSize(new Dimension(26 * em, 10));
         JPanel left = new JPanel(new BorderLayout(0, 6));
         left.add(listScroll, BorderLayout.CENTER);
         left.add(listButtons, BorderLayout.SOUTH);
@@ -172,6 +196,18 @@ public class PartySettingsDialog extends JDialog {
      * @return True if the presets were saved.
      */
     public static boolean showDialog(Component parent) {
+        return showDialog(parent, null, null, null).saved();
+    }
+
+    /**
+     * Shows the dialog (modal) with the values of a party of an invoice taken over into the presets (not yet saved):
+     * the hint or best matching entry is updated, if there is none a new entry is added.
+     *
+     * @param proposal Values to take over, null to just edit the presets.
+     * @param hint     The preset the party was chosen from, may be null.
+     * @param role     Role of the party in the invoice.
+     */
+    public static Result showDialog(Component parent, Party proposal, Party hint, Role role) {
         Window owner = parent instanceof Window w ? w : SwingUtilities.getWindowAncestor(parent);
         Path file = InvoiceData.partiesFile();
         List<Party> parties;
@@ -186,18 +222,53 @@ public class PartySettingsDialog extends JDialog {
             parties = new ArrayList<>();
         }
         PartySettingsDialog dialog = new PartySettingsDialog(owner, file, parties);
+        if (proposal != null)
+            dialog.applyProposal(proposal, hint, role);
         dialog.setLocationRelativeTo(owner);
         dialog.setVisible(true);
-        return dialog.saved;
+        return new Result(dialog.saved, dialog.savedSelection);
     }
 
     /**
-     * Name to show for a party in lists.
+     * Name and label to show for a party in lists.
      */
     static String displayName(Party p) {
         if (p == null)
             return "";
-        return p.name == null || p.name.isBlank() ? "(no name)" : p.name.trim();
+        return p.name == null || p.name.isBlank() ? "(no name)" : p.displayName();
+    }
+
+    private void applyProposal(Party proposal, Party hint, Role role) {
+        List<Party> entries = Collections.list(model.elements());
+        Party target = PartyPresets.applyProposal(entries, proposal, hint, role);
+        refreshModel(entries);
+        select(target);
+        // An update with the same values is no change.
+        dirty = !target.sameData(originals.get(target));
+        editor.getNameField().requestFocusInWindow();
+    }
+
+    private void refreshModel(List<Party> entries) {
+        model.clear();
+        entries.forEach(model::addElement);
+    }
+
+    private void select(Party p) {
+        list.setSelectedValue(p, true);
+        selectionChanged();
+    }
+
+    private void createCopy() {
+        Party p = list.getSelectedValue();
+        if (p == null)
+            return;
+        List<Party> entries = Collections.list(model.elements());
+        Party c = PartyPresets.createCopy(entries, p, originals.get(p));
+        refreshModel(entries);
+        select(c);
+        dirty = true;
+        editor.getLabelField().requestFocusInWindow();
+        editor.getLabelField().selectAll();
     }
 
     /**
@@ -215,6 +286,8 @@ public class PartySettingsDialog extends JDialog {
 
     private void selectionChanged() {
         Party p = list.getSelectedValue();
+        // Fields that differ from the saved entry are marked, a new entry has nothing to compare with.
+        editor.setBaseline(p == null ? null : originals.get(p));
         editor.setParty(p);
         updating = true;
         try {
@@ -226,6 +299,7 @@ public class PartySettingsDialog extends JDialog {
             updating = false;
         }
         remove.setEnabled(p != null);
+        copy.setEnabled(p != null);
     }
 
     private void addParty() {
@@ -252,8 +326,16 @@ public class PartySettingsDialog extends JDialog {
     }
 
     private void save() {
+        String duplicate = PartyPresets.findDuplicate(Collections.list(model.elements()));
+        if (duplicate != null) {
+            JOptionPane.showMessageDialog(this,
+                    "<html>There are several entries \"" + duplicate + "\".<br>Give them different labels.</html>",
+                    getTitle(), JOptionPane.WARNING_MESSAGE);
+            return;
+        }
         try {
             InvoiceData.saveParties(file, Collections.list(model.elements()));
+            savedSelection = list.getSelectedValue() == null ? null : list.getSelectedValue().copy();
             saved = true;
             dispose();
         } catch (Exception e) {

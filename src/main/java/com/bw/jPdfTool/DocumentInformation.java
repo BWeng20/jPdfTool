@@ -43,12 +43,41 @@ public final class DocumentInformation {
      * @param values   The values.
      */
     public static void apply(PDDocument document, Values values) {
+        Calendar now = now();
+        apply(document, values, now, now);
+    }
+
+    /**
+     * Copies the document information (title, author, ..., producer and creation date) to another document, e.g. one
+     * that was rewritten by a library that replaced them. The modification date is set to now.
+     *
+     * @param from The document to read the information from.
+     * @param to   The document to write to.
+     * @return False if the source has no document information, nothing is changed then.
+     */
+    public static boolean copy(PDDocument from, PDDocument to) {
+        PDDocumentInformation info = from.getDocumentInformation();
+        if (info == null)
+            return false;
+        Calendar created = info.getCreationDate();
+        Calendar now = now();
+        if (created != null)
+            created.set(Calendar.MILLISECOND, 0);
+        apply(to, new Values(info.getTitle(), info.getAuthor(), info.getSubject(), info.getKeywords(),
+                info.getCreator(), info.getProducer()), created == null ? now : created, now);
+        return true;
+    }
+
+    private static Calendar now() {
         Calendar now = Calendar.getInstance();
         // The info dictionary stores seconds only, XMP must be equal.
         now.set(Calendar.MILLISECOND, 0);
+        return now;
+    }
 
+    private static void apply(PDDocument document, Values values, Calendar created, Calendar now) {
         PDDocumentInformation info = new PDDocumentInformation();
-        info.setCreationDate(now);
+        info.setCreationDate(created);
         info.setModificationDate(now);
         info.setTitle(blankToNull(values.title()));
         info.setAuthor(blankToNull(values.author()));
@@ -65,7 +94,7 @@ public final class DocumentInformation {
             DomXmpParser parser = new DomXmpParser();
             parser.setStrictParsing(false);
             XMPMetadata xmp = parser.parse(metadata.toByteArray());
-            updateXmp(xmp, values, now);
+            updateXmp(xmp, values, created, now);
             ByteArrayOutputStream os = new ByteArrayOutputStream();
             new XmpSerializer().serialize(xmp, os, true);
             metadata.importXMPMetadata(os.toByteArray());
@@ -90,7 +119,7 @@ public final class DocumentInformation {
         }
     }
 
-    private static void updateXmp(XMPMetadata xmp, Values values, Calendar now) {
+    private static void updateXmp(XMPMetadata xmp, Values values, Calendar created, Calendar now) {
         DublinCoreSchema dc = xmp.getDublinCoreSchema();
         if (dc == null)
             dc = xmp.createAndAddDublinCoreSchema();
@@ -121,7 +150,7 @@ public final class DocumentInformation {
         remove(basic, XMPBasicSchema.CREATORTOOL);
         if (blankToNull(values.creator()) != null)
             basic.setCreatorTool(values.creator().trim());
-        basic.setCreateDate(now);
+        basic.setCreateDate(created);
         basic.setModifyDate(now);
         basic.setMetadataDate(now);
     }

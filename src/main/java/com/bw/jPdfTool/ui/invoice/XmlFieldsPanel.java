@@ -21,8 +21,10 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * All values of the invoice XML as a table: path, attributes and value. Values and attributes can be edited,
@@ -53,6 +55,11 @@ class XmlFieldsPanel extends JPanel {
     private List<InvoiceData.XmlField> visible = new ArrayList<>();
 
     /**
+     * Attributes and value by path when the editor was opened, null before.
+     */
+    private Map<String, String[]> original;
+
+    /**
      * @param onChange Called after the XML was changed.
      */
     XmlFieldsPanel(InvoiceData data, Runnable onChange) {
@@ -74,6 +81,17 @@ class XmlFieldsPanel extends JPanel {
                 return this;
             }
         });
+        DefaultTableCellRenderer marking = new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable t, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+                super.getTableCellRendererComponent(t, value, isSelected, hasFocus, row, column);
+                if (isModified(row, column))
+                    setBorder(Outline.cellBorder(getBorder(), this));
+                return this;
+            }
+        };
+        table.getColumnModel().getColumn(COL_ATTRIBUTES).setCellRenderer(marking);
+        table.getColumnModel().getColumn(COL_VALUE).setCellRenderer(marking);
         int em = table.getFontMetrics(table.getFont()).charWidth('m');
         table.getColumnModel().getColumn(COL_PATH).setPreferredWidth(34 * em);
         table.getColumnModel().getColumn(COL_ATTRIBUTES).setPreferredWidth(9 * em);
@@ -123,6 +141,25 @@ class XmlFieldsPanel extends JPanel {
         add(scroll, BorderLayout.CENTER);
         add(bottom, BorderLayout.SOUTH);
         updateRemove();
+    }
+
+    /**
+     * Remembers the values as the original ones. Values that differ later, or are new, are marked.
+     */
+    void captureOriginals() {
+        original = new HashMap<>();
+        for (InvoiceData.XmlField f : data.xmlFields())
+            original.put(f.path(), new String[]{f.attributes(), f.value().trim()});
+    }
+
+    private boolean isModified(int row, int column) {
+        if (original == null || row < 0 || row >= visible.size() || column == COL_PATH)
+            return false;
+        InvoiceData.XmlField f = visible.get(row);
+        String[] o = original.get(f.path());
+        if (o == null)
+            return true;
+        return column == COL_VALUE ? !f.value().trim().equals(o[1]) : !f.attributes().equals(o[0]);
     }
 
     /**

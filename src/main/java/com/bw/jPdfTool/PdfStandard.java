@@ -97,6 +97,30 @@ public final class PdfStandard {
     private static final String MUSTANG_SRGB_PROFILE = "sRGB.icc";
 
     /**
+     * Fixes what PDF/A forbids and can be fixed without changing the visible page, in place:
+     * <ul>
+     * <li>no output intent: adds an sRGB one, see {@link #addSrgbOutputIntent}</li>
+     * <li>image interpolation (/Interpolate true, inline /I true), image /Alternates and /OPI</li>
+     * <li>external stream data (/F, /FFilter, /FDecodeParms) and PostScript/reference XObject entries</li>
+     * <li>transfer functions and halftones in graphics states, unknown rendering intents</li>
+     * <li>JavaScript, launch/sound/movie/... actions and additional actions (/AA) of the catalog and form fields</li>
+     * <li>annotation flags: printable, not hidden</li>
+     * </ul>
+     * Problems that need real conversion (not embedded fonts, encryption, ...) are left to the validation.
+     *
+     * @param document The document.
+     * @return What was changed and how often, empty if the document was not changed.
+     */
+    public static java.util.Map<String, Integer> fixPdfaIssues(PDDocument document) throws java.io.IOException {
+        java.util.Map<String, Integer> changes = new java.util.LinkedHashMap<>();
+        if (addSrgbOutputIntent(document))
+            changes.put("Added sRGB output intent", 1);
+        changes.putAll(PdfaFixer.fix(document));
+        changes.forEach((what, times) -> Log.info("PDF/A: %s (%d)", what, times));
+        return changes;
+    }
+
+    /**
      * Adds an sRGB output intent if the document has no output intent at all.<br>
      * PDF/A needs an RGB output intent for device RGB colors (e.g. images rendered by this tool). A document with
      * another output intent (e.g. CMYK) is not changed: PDF/A allows only one output profile, and replacing it

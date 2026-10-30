@@ -28,9 +28,7 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Window;
 import java.awt.event.KeyEvent;
-import java.awt.event.MouseEvent;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.text.NumberFormat;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -68,12 +66,6 @@ public class InvoiceDialog extends JDialog {
 
     private static final Color AMOUNT_RULE = new Color(128, 128, 128, 90);
 
-    /**
-     * Width a value can shrink to (with "…") if the dialog is made narrow.
-     */
-    private static final int MIN_VALUE_WIDTH = 40;
-    private static final int MIN_DIALOG_WIDTH = 280;
-
     private final Locale locale = Locale.getDefault();
 
     private InvoiceDialog(Window owner, byte[] xml, EInvoice.Summary summary, String error) {
@@ -99,7 +91,7 @@ public class InvoiceDialog extends JDialog {
         setContentPane(main);
         pack();
         // Values shrink with "…", but keep the dialog usable.
-        setMinimumSize(new Dimension(MIN_DIALOG_WIDTH, 0));
+        setMinimumSize(new Dimension(280, 0));
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         getRootPane().registerKeyboardAction(e -> dispose(),
                 KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
@@ -218,7 +210,7 @@ public class InvoiceDialog extends JDialog {
         head.add(new JLabel(UI.getIcon("invoice")), gc);
         gc.gridheight = 1;
 
-        JLabel title = new ShrinkLabel(documentType(s.documentCode()) + (s.id() == null ? "" : " " + s.id()),
+        JLabel title = new JLabel(documentType(s.documentCode()) + (s.id() == null ? "" : " " + s.id()),
                 SwingConstants.LEADING);
         Font font = title.getFont();
         title.setFont(font.deriveFont(Font.BOLD, font.getSize2D() * 1.4f));
@@ -233,7 +225,7 @@ public class InvoiceDialog extends JDialog {
         gc.weighty = 1;
         gc.anchor = GridBagConstraints.SOUTHWEST;
         if (s.profile() != null) {
-            JLabel profile = new ShrinkLabel("ZUGFeRD / Factur-X, profile " + profileName(s.profile()),
+            JLabel profile = new JLabel("ZUGFeRD / Factur-X, profile " + profileName(s.profile()),
                     SwingConstants.LEADING);
             profile.setForeground(UIManager.getColor("Label.disabledForeground"));
             head.add(profile, gc);
@@ -253,9 +245,6 @@ public class InvoiceDialog extends JDialog {
         return l;
     }
 
-    /**
-     * Adds caption and value. The value takes all extra width and shrinks with "…" if there is not enough.
-     */
     private static void addRow(JPanel panel, GridBagConstraints gc, String caption, String value) {
         if (value == null)
             return;
@@ -268,7 +257,7 @@ public class InvoiceDialog extends JDialog {
         gc.insets = new Insets(3, 0, 3, 0);
         gc.weightx = 1;
         gc.fill = GridBagConstraints.HORIZONTAL;
-        panel.add(new ShrinkLabel(value, SwingConstants.LEADING), gc);
+        panel.add(new JLabel(value, SwingConstants.LEADING), gc);
         gc.weightx = 0;
         gc.fill = GridBagConstraints.NONE;
         gc.anchor = GridBagConstraints.WEST;
@@ -297,34 +286,6 @@ public class InvoiceDialog extends JDialog {
         gc.weightx = 0;
         gc.fill = GridBagConstraints.NONE;
         gc.anchor = GridBagConstraints.WEST;
-    }
-
-    /**
-     * A single-line label that can shrink below its preferred width, the text is cut with "…" then.
-     * If the text is cut (or had line breaks), the tooltip shows it completely.
-     */
-    private static final class ShrinkLabel extends JLabel {
-        private final String fullText;
-
-        ShrinkLabel(String text, int alignment) {
-            super(text.replaceAll("\\s*\\R\\s*", " "), alignment);
-            fullText = text;
-            // Registers the label at the tooltip manager, the text itself comes from getToolTipText(MouseEvent).
-            setToolTipText("");
-        }
-
-        @Override
-        public String getToolTipText(MouseEvent event) {
-            boolean cut = getWidth() < getPreferredSize().width;
-            return cut || !fullText.equals(getText()) ? "<html>" + escape(fullText) + "</html>" : null;
-        }
-
-        @Override
-        public Dimension getMinimumSize() {
-            Dimension d = getPreferredSize();
-            int iconWidth = getIcon() == null ? 0 : getIcon().getIconWidth() + getIconTextGap();
-            return new Dimension(Math.min(d.width, iconWidth + MIN_VALUE_WIDTH), d.height);
-        }
     }
 
     private static String escape(String s) {
@@ -391,7 +352,7 @@ public class InvoiceDialog extends JDialog {
         }
     }
 
-    private static final Pattern WHITESPACE = Pattern.compile("\s+");
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private static final Pattern IBAN_BLOCK = Pattern.compile("(.{4})(?!$)");
 
     /**

@@ -1,11 +1,105 @@
+# Theme of the manual (README as PDF). It extends the default theme of Asciidoctor PDF,
+# which provides the structure (heading sizes, spacing, lists, tables, code), and sets fonts and colors.
+extends: default
+
 font:
   catalog:
+    merge: true
     RobotoFont:
       normal: Roboto-Regular.ttf
       bold: Roboto-Bold.ttf
       italic: Roboto-Italic.ttf
       bold_italic: Roboto-BoldItalic.ttf
+
 page:
   layout: portrait
+  size: A4
+  margin: [22mm, 20mm, 22mm, 20mm]
+
 base:
   font_family: RobotoFont
+  font_size: 10.5
+  font_color: 333333
+  line_height_length: 15
+  line_height: $base_line_height_length / $base_font_size
+
+heading:
+  font_family: RobotoFont
+  font_color: 1F3A5F
+  font_style: bold
+  h1_font_size: 24
+  # The space below the document title pushes the introduction down on the first page.
+  h1_margin_bottom: 180
+  h2_font_size: 18
+  h3_font_size: 14
+  h4_font_size: 12
+  margin_top: 14
+  margin_bottom: 6
+
+title_page:
+  align: center
+  title:
+    font_family: RobotoFont
+    font_size: 34
+    font_color: 1F3A5F
+    top: 38%
+  subtitle:
+    font_family: RobotoFont
+    font_color: 666666
+
+link:
+  font_color: 1F5FA8
+
+role:
+  line-through:
+    text_decoration: line-through
+
+# Inline code and code blocks: the monospaced font of the default theme.
+codespan:
+  font_color: 8A1F3D
+code:
+  font_size: 9
+  background_color: F5F7FA
+  border_color: D8DEE6
+  border_width: 0.5
+  border_radius: 3
+  padding: [6, 8, 6, 8]
+
+table:
+  head:
+    font_style: bold
+    font_color: FFFFFF
+    background_color: 1F3A5F
+  border_color: D8DEE6
+  border_width: 0.5
+  cell:
+    padding: [4, 6, 4, 6]
+  body:
+    stripe_background_color: F5F7FA
+
+admonition:
+  label:
+    font_style: bold
+  column_rule_color: D8DEE6
+
+image:
+  align: center
+
+list:
+  indent: 16
+  item_spacing: 4
+
+footer:
+  height: 20mm
+  font_size: 8.5
+  font_color: 777777
+  recto:
+    left:
+      content: '{document-title}'
+    right:
+      content: '{page-number} / {page-count}'
+  verso:
+    left:
+      content: '{page-number} / {page-count}'
+    right:
+      content: '{document-title}'

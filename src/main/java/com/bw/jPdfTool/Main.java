@@ -26,7 +26,7 @@ import java.util.regex.Pattern;
 /**
  * CLI interface. Accepts file names as arguments and opens the UI or executes commands headless.
  */
-@Command(name = "jPdfTool", mixinStandardHelpOptions = true, version = "jPdfTool 2.1",
+@Command(name = "jPdfTool", mixinStandardHelpOptions = true, version = "jPdfTool " + BuildVersion.VERSION,
         footer = {
                 "",
                 "Permission flags have only effect if owner- or user-password is given.",

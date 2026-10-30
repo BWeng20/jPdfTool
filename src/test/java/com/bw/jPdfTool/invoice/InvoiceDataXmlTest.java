@@ -125,7 +125,7 @@ class InvoiceDataXmlTest {
     }
 
     @Test
-    void switchToMinimumRemovesWhatTheProfileHasNot() throws Exception {
+    void switchToMinimumRemovesWhatTheProfileHasNot()  {
         InvoiceData d = InvoiceDataTest.sample();
         d.note = "A note";
         d.seller.bic = "COBADEFFXXX";
@@ -295,6 +295,110 @@ class InvoiceDataXmlTest {
     }
 
     @Test
+    void servicePeriod_isWrittenReadAndValid() throws Exception {
+        for (String profile : List.of(InvoiceData.PROFILE_EN16931, "urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic",
+                "urn:factur-x.eu:1p0:basicwl")) {
+            InvoiceData d = InvoiceDataTest.sample();
+            d.profile = profile;
+            d.periodStart = java.time.LocalDate.of(2026, 1, 1);
+            d.periodEnd = java.time.LocalDate.of(2026, 1, 31);
+            byte[] xml = d.toXml();
+            String s = new String(xml, StandardCharsets.UTF_8);
+            Assertions.assertTrue(s.indexOf("20260101") < s.indexOf("20260131") && s.contains("BillingSpecifiedPeriod"), profile);
+            Assertions.assertDoesNotThrow(() -> EInvoice.attachXmlStrict(EInvoiceTest.plainPdf(1), xml), profile);
+
+            InvoiceData r = InvoiceData.fromXml(xml);
+            Assertions.assertEquals(d.periodStart, r.periodStart);
+            Assertions.assertEquals(d.periodEnd, r.periodEnd);
+
+            // Cleared: the element goes away.
+            r.periodStart = null;
+            r.periodEnd = null;
+            Assertions.assertFalse(new String(r.toXml(), StandardCharsets.UTF_8).contains("BillingSpecifiedPeriod"));
+        }
+    }
+
+    @Test
+    void servicePeriod_notWrittenWhereTheProfileHasNone() throws Exception {
+        InvoiceData d = InvoiceData.fromXml(EInvoiceTest.sampleXml());
+        Assertions.assertFalse(d.supports(InvoiceData.Field.PERIOD), "MINIMUM");
+        d.periodStart = java.time.LocalDate.of(2026, 1, 1);
+        Assertions.assertFalse(new String(d.toXml(), StandardCharsets.UTF_8).contains("BillingSpecifiedPeriod"));
+    }
+
+    @Test
+    void hints_serviceDate() throws Exception {
+        InvoiceData d = InvoiceDataTest.sample();
+        Assertions.assertEquals(List.of(), d.hints(), "sample has a delivery date");
+
+        d.deliveryDate = null;
+        Assertions.assertEquals(1, d.hints().size());
+        Assertions.assertTrue(d.hints().get(0).startsWith("Neither a delivery date nor a service period"));
+        Assertions.assertEquals(List.of(), d.check(), "a hint is no problem");
+
+        d.periodStart = java.time.LocalDate.of(2026, 1, 1);
+        Assertions.assertEquals(List.of(), d.hints(), "a period is enough");
+
+        d.periodEnd = java.time.LocalDate.of(2026, 1, 31);
+        d.deliveryDate = java.time.LocalDate.of(2026, 2, 1);
+        Assertions.assertEquals(List.of("The delivery date is outside the service period."), d.hints());
+        d.deliveryDate = java.time.LocalDate.of(2026, 1, 15);
+        Assertions.assertEquals(List.of(), d.hints());
+
+        // MINIMUM has neither field.
+        InvoiceData minimum = InvoiceData.fromXml(EInvoiceTest.sampleXml());
+        Assertions.assertEquals(List.of(), minimum.hints());
+    }
+
+    @Test
+    void buyerPaymentDefaults_onlyFillEmptyValues()  {
+        InvoiceData d = InvoiceDataTest.sample();
+        d.paymentTerms = null;
+        d.dueDate = null;
+        d.issueDate = java.time.LocalDate.of(2026, 10, 29);
+        d.buyer.paymentTerms = "Net 30 days";
+        d.buyer.paymentDays = 30;
+        Assertions.assertTrue(d.applyBuyerPaymentDefaults());
+        Assertions.assertEquals("Net 30 days", d.paymentTerms);
+        Assertions.assertEquals(java.time.LocalDate.of(2026, 11, 28), d.dueDate);
+
+        // Values of the invoice are kept.
+        d.buyer.paymentTerms = "Other";
+        d.buyer.paymentDays = 5;
+        Assertions.assertFalse(d.applyBuyerPaymentDefaults());
+        Assertions.assertEquals("Net 30 days", d.paymentTerms);
+        Assertions.assertEquals(java.time.LocalDate.of(2026, 11, 28), d.dueDate);
+    }
+
+    @Test
+    void buyerPaymentDefaults_areStoredInThePresets() throws Exception {
+        Party p = InvoiceDataTest.sample().buyer;
+        p.paymentTerms = "Net 14 days";
+        p.paymentDays = 14;
+        java.nio.file.Path file = java.nio.file.Files.createTempFile("parties", ".json");
+        try {
+            InvoiceData.saveParties(file, List.of(p));
+            Party back = InvoiceData.loadParties(file).get(0);
+            Assertions.assertEquals("Net 14 days", back.paymentTerms);
+            Assertions.assertEquals(14, back.paymentDays);
+            Assertions.assertTrue(p.sameData(back));
+            Party copy = new Party();
+            copy.copyFrom(back);
+            Assertions.assertEquals(14, copy.paymentDays);
+        } finally {
+            java.nio.file.Files.deleteIfExists(file);
+        }
+    }
+
+    @Test
+    void servicePeriod_endBeforeStartIsAProblem() throws Exception {
+        InvoiceData d = InvoiceDataTest.sample();
+        d.periodStart = java.time.LocalDate.of(2026, 2, 1);
+        d.periodEnd = java.time.LocalDate.of(2026, 1, 1);
+        Assertions.assertTrue(d.check().contains("The end of the service period is before its start."));
+    }
+
+    @Test
     void amountsOfAProfileWithoutItems() throws Exception {
         InvoiceData d = InvoiceDataTest.sample();
         d.profile = "urn:factur-x.eu:1p0:basicwl";
@@ -372,6 +476,21 @@ class InvoiceDataXmlTest {
                 () -> d.replaceXml("<Invoice xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\"/>".getBytes(StandardCharsets.UTF_8)));
         Assertions.assertEquals("OTHER-1", d.number);
         Assertions.assertEquals(1, d.lines.size());
+    }
+
+    @Test
+    void datesOfOtherFormatsAreRead() {
+        LocalDate day = LocalDate.of(2024, 10, 1);
+        Assertions.assertEquals(day, InvoiceData.parseDate("20241001", "102"));
+        Assertions.assertEquals(day, InvoiceData.parseDate("20241001", null));
+        Assertions.assertEquals(day, InvoiceData.parseDate("202410011530", "203"));
+        Assertions.assertEquals(day, InvoiceData.parseDate("2024-10-01", null));
+        Assertions.assertEquals(day, InvoiceData.parseDate("2024-10-01T15:30:00", null));
+        // Month and week formats have no day, and a wrong code must not be guessed.
+        Assertions.assertNull(InvoiceData.parseDate("202410", "610"));
+        Assertions.assertNull(InvoiceData.parseDate("20241001", "610"));
+        Assertions.assertNull(InvoiceData.parseDate("20241301", "102"));
+        Assertions.assertNull(InvoiceData.parseDate(null, null));
     }
 
     @Test

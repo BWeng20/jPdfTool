@@ -14,12 +14,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 
 public class EInvoiceTest {
 
-    public static byte[] sampleXml() throws IOException {
+    public static byte[] sampleXml() throws IOException, NullPointerException {
         try (InputStream is = EInvoiceTest.class.getResourceAsStream("/factur-x-minimum.xml")) {
-            return is.readAllBytes();
+            return Objects.requireNonNull(is).readAllBytes();
         }
     }
 
@@ -67,7 +68,7 @@ public class EInvoiceTest {
         try (PDDocument doc = Loader.loadPDF(invoicePdf(1))) {
             Assertions.assertTrue(EInvoice.hasInvoice(doc));
             byte[] xml = EInvoice.extractXml(doc).orElseThrow();
-            Assertions.assertTrue(new String(xml, "UTF-8").contains("INV-2024-001"));
+            Assertions.assertTrue(new String(xml, StandardCharsets.UTF_8).contains("INV-2024-001"));
         }
     }
 
@@ -81,14 +82,14 @@ public class EInvoiceTest {
     }
 
     @Test
-    void test_attachStrictFailsIfNotConform() throws Exception {
+    void test_attachStrictFailsIfNotConform() {
         Assertions.assertThrows(EInvoice.NotConformException.class,
                 () -> EInvoice.attachXmlStrict(nonConformPdf(), sampleXml()));
         Assertions.assertDoesNotThrow(() -> EInvoice.attachXmlStrict(plainPdf(1), sampleXml()));
     }
 
     @Test
-    void test_randomEn16931Invoices() throws Exception {
+    void test_randomEn16931Invoices()  {
         // Random but consistent invoices, the seed is part of the message to reproduce a failure.
         for (int i = 0; i < 5; ++i) {
             InvoiceXmlGenerator gen = new InvoiceXmlGenerator(System.nanoTime() + i);
@@ -106,7 +107,7 @@ public class EInvoiceTest {
     }
 
     @Test
-    void test_randomInvoiceWithWrongScheme() throws Exception {
+    void test_randomInvoiceWithWrongScheme()  {
         // 9930 is not an allowed scheme for the legal organization
         InvoiceXmlGenerator gen = new InvoiceXmlGenerator(System.nanoTime());
         String broken = gen.create("9930");
@@ -280,6 +281,105 @@ public class EInvoiceTest {
             Assertions.assertTrue(EInvoice.hasInvoice(doc));
             Assertions.assertEquals(2, doc.getNumberOfPages());
         }
+    }
+
+    private static byte[] pdfWithInterpolatedImages() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage();
+            doc.addPage(page);
+            var img = org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory.createFromImage(doc,
+                    new java.awt.image.BufferedImage(4, 4, java.awt.image.BufferedImage.TYPE_INT_RGB));
+            img.getCOSObject().setBoolean(org.apache.pdfbox.cos.COSName.INTERPOLATE, true);
+            try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+                cs.drawImage(img, 10, 10, 20, 20);
+            }
+            // inline image with /I true
+            var inline = org.apache.pdfbox.contentstream.operator.Operator.getOperator("BI");
+            var params = new org.apache.pdfbox.cos.COSDictionary();
+            params.setInt(org.apache.pdfbox.cos.COSName.W, 1);
+            params.setInt(org.apache.pdfbox.cos.COSName.H, 1);
+            params.setInt(org.apache.pdfbox.cos.COSName.BPC, 8);
+            params.setItem(org.apache.pdfbox.cos.COSName.CS, org.apache.pdfbox.cos.COSName.G);
+            params.setBoolean(org.apache.pdfbox.cos.COSName.I, true);
+            inline.setImageParameters(params);
+            inline.setImageData(new byte[]{0});
+            var tokens = new java.util.ArrayList<>();
+            tokens.add(inline);
+            var all = new java.util.ArrayList<>(new org.apache.pdfbox.pdfparser.PDFStreamParser(page).parse());
+            all.addAll(tokens);
+            var stream = new org.apache.pdfbox.pdmodel.common.PDStream(doc);
+            try (var out = stream.createOutputStream()) {
+                new org.apache.pdfbox.pdfwriter.ContentStreamWriter(out).writeTokens(all);
+            }
+            page.setContents(stream);
+            return save(doc);
+        }
+    }
+
+    @Test
+    void test_interpolation_isCleared() throws Exception {
+        byte[] pdf = pdfWithInterpolatedImages();
+        byte[] fixed = EInvoice.fixPdfaIssues(pdf);
+        Assertions.assertNotSame(pdf, fixed);
+        try (PDDocument doc = Loader.loadPDF(fixed)) {
+            var res = doc.getPage(0).getResources();
+            for (var name : res.getXObjectNames())
+                Assertions.assertFalse(res.getXObject(name).getCOSObject()
+                        .getBoolean(org.apache.pdfbox.cos.COSName.INTERPOLATE, false));
+            var parser = new org.apache.pdfbox.pdfparser.PDFStreamParser(doc.getPage(0));
+            boolean found = false;
+            for (Object t : parser.parse()) {
+                if (t instanceof org.apache.pdfbox.contentstream.operator.Operator op && "BI".equals(op.getName())) {
+                    found = true;
+                    Assertions.assertFalse(op.getImageParameters().getBoolean(org.apache.pdfbox.cos.COSName.I, false));
+                }
+            }
+            Assertions.assertTrue(found);
+        }
+        Assertions.assertSame(fixed, EInvoice.fixPdfaIssues(fixed), "nothing left to fix");
+    }
+
+    @Test
+    void test_forbiddenFeatures_areRemoved() throws Exception {
+        var N = (java.util.function.Function<String, org.apache.pdfbox.cos.COSName>) org.apache.pdfbox.cos.COSName::getPDFName;
+        byte[] pdf;
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage();
+            doc.addPage(page);
+            var gs = new org.apache.pdfbox.cos.COSDictionary();
+            gs.setItem(N.apply("TR"), N.apply("Identity"));
+            gs.setItem(N.apply("TR2"), N.apply("Identity"));
+            gs.setItem(N.apply("RI"), N.apply("Bogus"));
+            var states = new org.apache.pdfbox.cos.COSDictionary();
+            states.setItem(N.apply("GS0"), gs);
+            var res = new PDResources();
+            res.getCOSObject().setItem(N.apply("ExtGState"), states);
+            page.setResources(res);
+            var annot = new org.apache.pdfbox.cos.COSDictionary();
+            annot.setItem(N.apply("Subtype"), N.apply("Link"));
+            annot.setInt(N.apply("F"), 2);
+            var annots = new org.apache.pdfbox.cos.COSArray();
+            annots.add(annot);
+            page.getCOSObject().setItem(N.apply("Annots"), annots);
+            var launch = new org.apache.pdfbox.cos.COSDictionary();
+            launch.setItem(N.apply("S"), N.apply("Launch"));
+            doc.getDocumentCatalog().getCOSObject().setItem(N.apply("OpenAction"), launch);
+            pdf = save(doc);
+        }
+        byte[] fixed = EInvoice.fixPdfaIssues(pdf);
+        Assertions.assertNotSame(pdf, fixed);
+        try (PDDocument doc = Loader.loadPDF(fixed)) {
+            Assertions.assertFalse(doc.getDocumentCatalog().getCOSObject().containsKey(N.apply("OpenAction")));
+            var state = doc.getPage(0).getResources().getCOSObject().getCOSDictionary(N.apply("ExtGState"))
+                    .getCOSDictionary(N.apply("GS0"));
+            Assertions.assertFalse(state.containsKey(N.apply("TR")));
+            Assertions.assertFalse(state.containsKey(N.apply("TR2")));
+            Assertions.assertEquals("RelativeColorimetric", state.getNameAsString(N.apply("RI")));
+            var a = (org.apache.pdfbox.cos.COSDictionary) doc.getPage(0).getCOSObject()
+                    .getCOSArray(N.apply("Annots")).getObject(0);
+            Assertions.assertEquals(4, a.getInt(N.apply("F")));
+        }
+        Assertions.assertSame(fixed, EInvoice.fixPdfaIssues(fixed));
     }
 
     @Test

@@ -2,12 +2,12 @@ plugins {
     id 'java'
     id 'application'
     id 'edu.sc.seis.launch4j' version '4.0.0'
-    id 'org.asciidoctor.jvm.convert' version '4.0.4'
-    id 'org.asciidoctor.jvm.pdf' version '4.0.4'
+    id 'org.asciidoctor.jvm.convert' version '4.0.5'
+    id 'org.asciidoctor.jvm.pdf' version '4.0.5'
 }
 
 group = 'io.github.bweng20'
-version = '2.1'
+version = '3.0'
 
 
 repositories {
@@ -15,7 +15,7 @@ repositories {
 }
 
 ext {
-    junitVersion = '5.8.1'
+    junitVersion = '5.14.4'
     picocliVersion = '4.7.7'
     mustangVersion = '2.26.0'
     // Keep in sync with the version Mustang uses (see 'gradlew dependencies'), otherwise Gradle silently upgrades.
@@ -40,7 +40,7 @@ tasks.withType(Javadoc).configureEach {
 
 dependencies {
 
-    implementation "com.formdev:flatlaf:3.6.1"
+    implementation "com.formdev:flatlaf:3.7.2"
     implementation "com.formdev:flatlaf-fonts-roboto:2.137"
     implementation "io.github.bweng20:jSVGIcon:1.6"
 
@@ -54,7 +54,7 @@ dependencies {
 
     implementation "org.mustangproject:library:${mustangVersion}"
     implementation "org.mustangproject:validator:${mustangVersion}"
-    implementation 'org.slf4j:slf4j-nop:2.0.17'
+    implementation 'org.slf4j:slf4j-nop:2.0.20'
     // Seller presets (sellers.json). Version used by Mustang, otherwise Gradle silently upgrades.
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.22.4'
 
@@ -63,6 +63,67 @@ dependencies {
 
     testImplementation "org.junit.jupiter:junit-jupiter-api:${junitVersion}"
     testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:${junitVersion}"
+    // Gradle 8 brings an older launcher, which doesn't match the engine of JUnit 5.14.
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher:1.14.4"
+}
+
+// The version of this file is the only place with the version number: it is written into a Java class (BuildVersion)
+// before compiling, together with the build date and the libraries the tool uses.
+def versionSourceDir = layout.buildDirectory.dir('generated/sources/version/java')
+
+tasks.register('generateVersion') {
+    def outputDir = versionSourceDir
+    def versionText = project.version.toString()
+    def buildDate = java.time.LocalDate.now().toString()
+    def runtime = configurations.runtimeClasspath
+    inputs.property('version', versionText)
+    inputs.property('buildDate', buildDate)
+    inputs.files(runtime)
+    outputs.dir(outputDir)
+    doLast {
+        // The libraries the project depends on directly, e.g. "org.apache.pdfbox:pdfbox:3.0.8".
+        def libraries = runtime.resolvedConfiguration.firstLevelModuleDependencies
+                .collect { "${it.moduleGroup}:${it.moduleName}:${it.moduleVersion}".toString() }
+                .sort()
+        def libraryLines = libraries.collect { '            "' + it + '"' }.join(',\n')
+        def file = outputDir.get().file('com/bw/jPdfTool/BuildVersion.java').asFile
+        file.parentFile.mkdirs()
+        file.text = """package com.bw.jPdfTool;
+
+/**
+ * Version, build date and libraries of the tool, written by the Gradle task generateVersion. Do not edit.
+ */
+public final class BuildVersion {
+
+    public static final String VERSION = "${versionText}";
+
+    /**
+     * Day of the build, "yyyy-MM-dd".
+     */
+    public static final String BUILD_DATE = "${buildDate}";
+
+    /**
+     * The direct dependencies as "group:name:version".
+     */
+    public static final String[] LIBRARIES = {
+${libraryLines}
+    };
+
+    private BuildVersion() {
+    }
+}
+"""
+    }
+}
+
+sourceSets.main.java.srcDir(versionSourceDir)
+tasks.named('compileJava') {
+    dependsOn 'generateVersion'
+}
+
+// The license is shown in the About dialog.
+processResources {
+    from(layout.projectDirectory.file('LICENSE'))
 }
 
 test {
@@ -99,9 +160,15 @@ pdfThemes {
 
 asciidoctorPdf {
     dependsOn(copyDoc)
+    // A changed theme or font creates the PDF again.
+    inputs.dir('src/docs/themes')
     attributes 'pdf-themesdir': "${projectDir}/src/docs/themes",
             'pdf-theme': 'basic', // Matches 'custom-theme.yml'
-            'pdf-fontsdir': "${projectDir}/src/docs/themes/fonts"
+            'pdf-fontsdir': "${projectDir}/src/docs/themes/fonts",
+            'toc': 'macro',
+            'toclevels': '2',
+            'sectnums': '',
+            'icons': 'font'
 
     asciidoctorj {
         options 'verbose': true
@@ -113,6 +180,28 @@ asciidoctorPdf {
     }
     outputDir = file('build/doc/pdf')
 
+}
+
+// The README as PDF is the manual. It is not part of the jar but lies beside it (see Manual.java), in the
+// distributions and when running with Gradle. asciidoctorPdf is only executed again if the README changed.
+tasks.register('bundleManual', Copy) {
+    dependsOn asciidoctorPdf
+    from(layout.buildDirectory.dir('doc/pdf')) {
+        include 'README.pdf'
+        rename 'README.pdf', 'manual.pdf'
+    }
+    into layout.buildDirectory.dir('manual')
+}
+
+distributions.main.contents {
+    from(tasks.named('bundleManual')) {
+        into 'lib'
+    }
+}
+
+tasks.named('run') {
+    dependsOn 'bundleManual'
+    systemProperty 'jpdftool.manual', layout.buildDirectory.file('manual/manual.pdf').get().asFile.absolutePath
 }
 
 tasks.register('cleanJreDir', Delete) {
@@ -155,7 +244,7 @@ tasks.register('distZipWithJre', Zip) {
     group = "distribution"
     dependsOn(jlink)
     dependsOn(createExe)
-    dependsOn(asciidoctorPdf)
+    dependsOn(bundleManual)
     from('build/launch4j')
     from('build/jre') {
         into 'jre'
@@ -164,9 +253,9 @@ tasks.register('distZipWithJre', Zip) {
         include '*.jar'
         into 'lib'
     }
-    from('build/doc/pdf') {
-        include '*.pdf'
-        into 'doc'
+    // The manual lies beside the jar.
+    from(tasks.named('bundleManual')) {
+        into 'lib'
     }
     archiveFileName = "jPdfTool-${project.version}-jre.zip"
     destinationDirectory = layout.buildDirectory.dir("distributions").get()

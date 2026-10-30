@@ -70,6 +70,16 @@ class PdfStandardTest {
     }
 
     @Test
+    void test_fixPdfaIssues_addsOutputIntentOnce() throws Exception {
+        try (PDDocument doc = Loader.loadPDF(EInvoiceTest.plainPdf(1))) {
+            Assertions.assertEquals(java.util.List.of("Added sRGB output intent"),
+                    new java.util.ArrayList<>(PdfStandard.fixPdfaIssues(doc).keySet()));
+            Assertions.assertTrue(PdfStandard.hasRgbOutputIntent(doc));
+            Assertions.assertTrue(PdfStandard.fixPdfaIssues(doc).isEmpty(), "nothing left to fix");
+        }
+    }
+
+    @Test
     void test_addSrgbOutputIntent() throws Exception {
         try (PDDocument doc = Loader.loadPDF(EInvoiceTest.plainPdf(1))) {
             Assertions.assertTrue(PdfStandard.addSrgbOutputIntent(doc));

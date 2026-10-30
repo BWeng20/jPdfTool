@@ -101,6 +101,8 @@ final class CiiXml {
                     "ApplicableTradeSettlementFinancialCard", "PayerPartyDebtorFinancialAccount",
                     "PayeePartyCreditorFinancialAccount", "PayeeSpecifiedCreditorFinancialInstitution")),
             Map.entry("PayeePartyCreditorFinancialAccount", List.of("IBANID", "AccountName", "ProprietaryID")),
+            Map.entry("BillingSpecifiedPeriod", List.of("Description", "StartDateTime", "EndDateTime",
+                    "CompleteDateTime")),
             Map.entry("SpecifiedTradePaymentTerms", List.of("Description", "DueDateDateTime", "DirectDebitMandateID",
                     "PartialPaymentAmount", "ApplicableTradePaymentPenaltyTerms", "ApplicableTradePaymentDiscountTerms",
                     "PayeeTradeParty")),

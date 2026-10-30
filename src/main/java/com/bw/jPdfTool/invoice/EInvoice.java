@@ -1,6 +1,7 @@
 package com.bw.jPdfTool.invoice;
 
 import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.PdfStandard;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
@@ -284,6 +285,7 @@ public final class EInvoice {
      */
     public static byte[] attachXml(byte[] pdf, byte[] xml) throws IOException {
         pdf = addMissingResources(pdf);
+        pdf = fixPdfaIssues(pdf);
         try (IZUGFeRDExporter exporter = loadExporter(pdf)) {
             ByteArrayOutputStream os = new ByteArrayOutputStream(pdf.length + xml.length + 64 * 1024);
             exporter.setXML(xml);
@@ -313,6 +315,22 @@ public final class EInvoice {
             if (!changed)
                 return pdf;
             Log.debug("Added empty resources to pages without resources.");
+            ByteArrayOutputStream os = new ByteArrayOutputStream(pdf.length + 1024);
+            document.save(os);
+            return os.toByteArray();
+        }
+    }
+
+    /**
+     * Makes the PDF as PDF/A-3 conform as possible, see {@link PdfStandard#fixPdfaIssues}.
+     *
+     * @param pdf The PDF.
+     * @return The same array if nothing needs a change, otherwise the fixed PDF.
+     */
+    static byte[] fixPdfaIssues(byte[] pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf)) {
+            if (PdfStandard.fixPdfaIssues(document).isEmpty())
+                return pdf;
             ByteArrayOutputStream os = new ByteArrayOutputStream(pdf.length + 1024);
             document.save(os);
             return os.toByteArray();
@@ -462,8 +480,8 @@ public final class EInvoice {
         Matcher m = LOCATION_STEP.matcher(xpath);
         StringBuilder sb = new StringBuilder();
         while (m.find())
-            sb.append(sb.length() == 0 ? "" : "/").append(m.group(1)).append('[').append(m.group(2)).append(']');
-        return sb.length() == 0 ? xpath : sb.toString();
+            sb.append(sb.isEmpty() ? "" : "/").append(m.group(1)).append('[').append(m.group(2)).append(']');
+        return sb.isEmpty() ? xpath : sb.toString();
     }
 
     private static final Pattern PDFA_FAILURE = Pattern.compile("status=failed, message=(.*?), location=");

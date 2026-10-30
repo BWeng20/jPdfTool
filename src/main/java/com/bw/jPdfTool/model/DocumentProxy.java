@@ -1,7 +1,9 @@
 package com.bw.jPdfTool.model;
 
 import com.bw.jPdfTool.invoice.EInvoice;
+import com.bw.jPdfTool.DocumentInformation;
 import com.bw.jPdfTool.Log;
+import com.bw.jPdfTool.PdfStandard;
 import com.bw.jPdfTool.Preferences;
 import com.bw.jPdfTool.Redactor;
 import org.apache.pdfbox.Loader;
@@ -26,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Simple proxy for lazy asynchronous handling of the pdf documents.
@@ -49,6 +52,12 @@ public class DocumentProxy {
      * Returns an error message to refuse the document, null to accept it.
      */
     public java.util.function.Function<PDDocument, String> appendCheck;
+
+    /**
+     * Called (from any thread) with what was changed if the document had to be fixed for PDF/A before an
+     * invoice was attached, see {@link #attachInvoice}.
+     */
+    public java.util.function.Consumer<Map<String, Integer>> pdfaFixListener;
 
     /**
      * Checks a loaded document before it is appended, see {@link #appendCheck}.
@@ -413,20 +422,48 @@ public class DocumentProxy {
 
     /**
      * Attaches an invoice XML (ZUGFeRD/Factur-X) to the effective document, see {@link EInvoice#attachXml}.
-     * An existing invoice is replaced. The visible pages are not changed.
+     * An existing invoice is replaced. The visible pages are not changed.<br>
+     * The document is fixed for PDF/A first, see {@link #fixPdfa}, then the invoice is attached.
+     * The {@link #pdfaFixListener} gets what was fixed.
      *
-     * @throws EInvoice.NotConformException If the result was no valid invoice. The document is not changed then.
+     * @throws EInvoice.NotConformException If the result was no valid invoice. The PDF/A fixes are kept then.
      */
     public void attachInvoice(byte[] xml) throws IOException {
         ensuredDocument();
+        Map<String, Integer> changes = fixPdfa();
+        if (!changes.isEmpty() && pdfaFixListener != null)
+            pdfaFixListener.accept(changes);
         PDDocument newDocument = Loader.loadPDF(EInvoice.attachXmlStrict(getBytes(), xml));
         PDDocument oldDocument;
         synchronized (this) {
+            // The library replaces the producer etc., keep the ones of the document.
+            DocumentInformation.copy(document, newDocument);
             oldDocument = document;
             document = newDocument;
         }
         IOUtils.closeQuietly(oldDocument);
         fireDocumentLoaded();
+    }
+
+    /**
+     * Fixes what PDF/A forbids, see {@link PdfStandard#fixPdfaIssues}. The thumbnails are redrawn if the
+     * document was changed.
+     *
+     * @return What was changed and how often, empty if nothing.
+     */
+    public Map<String, Integer> fixPdfa() throws IOException {
+        ensuredDocument();
+        Map<String, Integer> changes = PdfStandard.fixPdfaIssues(document);
+        if (!changes.isEmpty()) {
+            synchronized (this) {
+                for (Page p : pages) {
+                    p.image = null;
+                    p.scale = 0;
+                }
+            }
+            refirePages();
+        }
+        return changes;
     }
 
     /**

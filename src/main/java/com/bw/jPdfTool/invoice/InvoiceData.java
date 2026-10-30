@@ -24,8 +24,10 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -269,7 +271,7 @@ public final class InvoiceData {
          * The VAT of this amount, rounded to cents. Null if net amount or rate is missing.
          */
         public BigDecimal vat() {
-            if (readVat != null && same(net, readNet) && (same(vatPercent, readRate) || vatPercent == readRate))
+            if (readVat != null && same(net, readNet) && (same(vatPercent, readRate) || Objects.equals(vatPercent, readRate)))
                 return readVat;
             if (net == null || vatPercent == null)
                 return null;
@@ -286,7 +288,16 @@ public final class InvoiceData {
     public String number;
     public LocalDate issueDate = LocalDate.now();
     public LocalDate deliveryDate;
+    /**
+     * Invoicing period (BG-14), e.g. the month of a service. Either end may be missing.
+     */
+    public LocalDate periodStart;
+    public LocalDate periodEnd;
     public LocalDate dueDate;
+    /**
+     * Dates of the XML that couldn't be read (caption to text), e.g. a month format without a day.
+     */
+    private final Map<String, String> unreadableDates = new HashMap<>();
     public String currency = "EUR";
     /**
      * Reference of the buyer (BT-10). For XRechnung this is the "Leitweg-ID".
@@ -370,6 +381,10 @@ public final class InvoiceData {
     public enum Field {
         NOTE, DELIVERY_DATE,
         /**
+         * Invoicing period, the start and the end of the service.
+         */
+        PERIOD,
+        /**
          * Due date and payment terms.
          */
         PAYMENT,
@@ -424,9 +439,13 @@ public final class InvoiceData {
         if (!isSet(number))
             problems.add("Invoice number is missing.");
         if (issueDate == null)
-            problems.add("Issue date is missing.");
+            problems.add(unreadableDates.containsKey("Issue date")
+                    ? "Issue date '" + unreadableDates.get("Issue date") + "' of the XML can't be read, enter it again."
+                    : "Issue date is missing.");
         if (!isSet(currency) || !currency.trim().matches("[A-Za-z]{3}"))
             problems.add("Currency must be a three letter code like EUR.");
+        if (supports(Field.PERIOD) && periodStart != null && periodEnd != null && periodEnd.isBefore(periodStart))
+            problems.add("The end of the service period is before its start.");
         // MINIMUM and BASIC WL only carry the sums: no items, and less data of the parties.
         boolean itemless = !hasItems();
         checkParty(problems, "Seller", seller, supports(Field.SELLER_ADDRESS), true);
@@ -477,6 +496,45 @@ public final class InvoiceData {
                 problems.add("XRechnung needs the e-mail of the buyer.");
         }
         return problems;
+    }
+
+    /**
+     * Notes that don't prevent the invoice, but are worth a look.
+     *
+     * @return Readable hints, empty if there is nothing to note.
+     */
+    public List<String> hints() {
+        List<String> hints = new ArrayList<>();
+        if (supports(Field.PERIOD)) {
+            boolean period = periodStart != null || periodEnd != null;
+            if (deliveryDate == null && !period)
+                hints.add("Neither a delivery date nor a service period is given. The invoice should state one of them.");
+            if (deliveryDate != null && ((periodStart != null && deliveryDate.isBefore(periodStart))
+                    || (periodEnd != null && deliveryDate.isAfter(periodEnd))))
+                hints.add("The delivery date is outside the service period.");
+        }
+        return hints;
+    }
+
+    /**
+     * Takes the default payment terms of the buyer (from a preset) over into the invoice, where the invoice has none:
+     * the terms if they are empty, the due date (days after the issue date) if it is empty.
+     *
+     * @return True if something was changed.
+     */
+    public boolean applyBuyerPaymentDefaults() {
+        if (!supports(Field.PAYMENT))
+            return false;
+        boolean changed = false;
+        if (!isSet(paymentTerms) && isSet(buyer.paymentTerms)) {
+            paymentTerms = buyer.paymentTerms.trim();
+            changed = true;
+        }
+        if (dueDate == null && buyer.paymentDays != null && issueDate != null) {
+            dueDate = issueDate.plusDays(buyer.paymentDays);
+            changed = true;
+        }
+        return changed;
     }
 
     /**
@@ -576,6 +634,8 @@ public final class InvoiceData {
         setDate(delivery, supports(Field.DELIVERY_DATE) ? deliveryDate : null, "ActualDeliverySupplyChainEvent", "OccurrenceDateTime");
 
         Element settlement = ensure(tx, "ApplicableHeaderTradeSettlement");
+        setDate(settlement, supports(Field.PERIOD) ? periodStart : null, "BillingSpecifiedPeriod", "StartDateTime");
+        setDate(settlement, supports(Field.PERIOD) ? periodEnd : null, "BillingSpecifiedPeriod", "EndDateTime");
         set(settlement, upper(currency), "InvoiceCurrencyCode");
         writeBankAccount(settlement);
         set(settlement, supports(Field.PAYMENT) ? paymentTerms : null, "SpecifiedTradePaymentTerms", "Description");
@@ -593,7 +653,7 @@ public final class InvoiceData {
     private void amountsFromItems() {
         java.util.Map<BigDecimal, BigDecimal> perRate = new java.util.LinkedHashMap<>();
         for (Line l : lines)
-            if (l.vatPercent != null && l.total() != null)
+            if (l != null && l.vatPercent != null && l.total() != null)
                 perRate.merge(l.vatPercent.stripTrailingZeros(), l.total(), BigDecimal::add);
         perRate.forEach((rate, net) -> vatAmounts.add(new VatAmount(net, rate)));
     }
@@ -813,23 +873,75 @@ public final class InvoiceData {
     private static void setDate(Element parent, LocalDate date, String... path) {
         String[] full = java.util.Arrays.copyOf(path, path.length + 1);
         full[path.length] = "DateTimeString";
-        String old = text(parent, full);
-        LocalDate oldDate = parseDate(old);
+        Element container = find(parent, path);
+        String old = dateText(container);
+        LocalDate oldDate = parseDate(old, dateFormat(container));
         if (Objects.equals(oldDate, date) || (date == null && old != null && oldDate == null))
             return;
+        // DateTimeString and DateTime are alternatives: don't leave the old one next to the new one.
+        if (container != null)
+            for (Element dt : children(container, "DateTime"))
+                container.removeChild(dt);
         Element e = set(parent, date == null ? null : date.format(DATE_102), full);
         if (e != null)
             e.setAttribute("format", "102");
     }
 
+    /**
+     * Text of the date element: "DateTimeString", or "DateTime" (xs:dateTime).
+     */
+    private static String dateText(Element container) {
+        String s = text(container, "DateTimeString");
+        return s != null ? s : text(container, "DateTime");
+    }
+
+    /**
+     * Format code (UN/CEFACT 2379) of the date element, null if not given.
+     */
+    private static String dateFormat(Element container) {
+        Element e = find(container, "DateTimeString");
+        return e == null || !isSet(e.getAttribute("format")) ? null : e.getAttribute("format").trim();
+    }
+
+    /**
+     * Reads the date at the path. EN 16931 only allows format 102 ("yyyyMMdd"), but other files
+     * use further formats, e.g. 203 ("yyyyMMddHHmm") or ISO dates.
+     * A date that can't be read is remembered in {@link #unreadableDates}.
+     */
+    private LocalDate readDate(String caption, Element parent, String... path) {
+        Element container = find(parent, path);
+        String s = dateText(container);
+        LocalDate d = parseDate(s, dateFormat(container));
+        if (d == null && s != null)
+            unreadableDates.put(caption, s);
+        return d;
+    }
+
     private static LocalDate parseDate(String s) {
+        return parseDate(s, null);
+    }
+
+    /**
+     * Parses a date of the XML.
+     *
+     * @param format The format code, null if unknown. Month or week formats (e.g. 610) have no day.
+     * @return The date, null if it is not given or has no day or an unknown form.
+     */
+    static LocalDate parseDate(String s, String format) {
         if (s == null)
             return null;
+        String t = s.trim();
         try {
-            return LocalDate.parse(s.trim(), DATE_102);
+            // 102 (yyyyMMdd), 203 (yyyyMMddHHmm), 204 (yyyyMMddHHmmss): the date comes first.
+            if (t.matches("\\d{8}(\\d{4}(\\d{2})?)?") && (format == null || format.matches("102|203|204")))
+                return LocalDate.parse(t.substring(0, 8), DATE_102);
+            // ISO date, with or without time.
+            if (t.matches("\\d{4}-\\d{2}-\\d{2}([T ].*)?"))
+                return LocalDate.parse(t.substring(0, 10));
         } catch (Exception e) {
-            return null;
+            // not a valid date
         }
+        return null;
     }
 
     // ---------------------------------------------------------------- read
@@ -845,7 +957,8 @@ public final class InvoiceData {
         Element exchanged = find(root, "ExchangedDocument");
         number = text(exchanged, "ID");
         documentCode = Objects.requireNonNullElse(text(exchanged, "TypeCode"), TYPE_INVOICE);
-        issueDate = parseDate(text(exchanged, "IssueDateTime", "DateTimeString"));
+        unreadableDates.clear();
+        issueDate = readDate("Issue date", exchanged, "IssueDateTime");
         note = text(generalNote(exchanged), "Content");
 
         Element tx = find(root, "SupplyChainTradeTransaction");
@@ -854,17 +967,19 @@ public final class InvoiceData {
         readParty(find(agreement, "SellerTradeParty"), seller);
         readParty(find(agreement, "BuyerTradeParty"), buyer);
 
-        deliveryDate = parseDate(text(tx, "ApplicableHeaderTradeDelivery", "ActualDeliverySupplyChainEvent",
-                "OccurrenceDateTime", "DateTimeString"));
+        deliveryDate = readDate("Delivery date", tx, "ApplicableHeaderTradeDelivery", "ActualDeliverySupplyChainEvent",
+                "OccurrenceDateTime");
 
         Element settlement = find(tx, "ApplicableHeaderTradeSettlement");
+        periodStart = readDate("Period start", settlement, "BillingSpecifiedPeriod", "StartDateTime");
+        periodEnd = readDate("Period end", settlement, "BillingSpecifiedPeriod", "EndDateTime");
         currency = text(settlement, "InvoiceCurrencyCode");
         Element means = paymentMeans(settlement);
         seller.iban = text(means, "PayeePartyCreditorFinancialAccount", "IBANID");
         seller.accountHolder = text(means, "PayeePartyCreditorFinancialAccount", "AccountName");
         seller.bic = text(means, "PayeeSpecifiedCreditorFinancialInstitution", "BICID");
         paymentTerms = text(settlement, "SpecifiedTradePaymentTerms", "Description");
-        dueDate = parseDate(text(settlement, "SpecifiedTradePaymentTerms", "DueDateDateTime", "DateTimeString"));
+        dueDate = readDate("Due date", settlement, "SpecifiedTradePaymentTerms", "DueDateDateTime");
         vatExemptionReason = null;
         for (Element t : children(settlement, "ApplicableTradeTax"))
             if (vatExemptionReason == null)
@@ -953,7 +1068,8 @@ public final class InvoiceData {
         if (uri == null)
             return true;
         String scheme = uri.getAttribute("schemeID");
-        return scheme.isEmpty() ? text(uri) == null || text(uri).contains("@") : "EM".equals(scheme);
+        final String turi =  text(uri);
+        return scheme.isEmpty() ? turi == null || turi.contains("@") : "EM".equals(scheme);
     }
 
     private static void readParty(Element tp, Party p) {
@@ -1020,7 +1136,7 @@ public final class InvoiceData {
                 Attr a = (Attr) attrs.item(i);
                 if (XMLConstants.XMLNS_ATTRIBUTE_NS_URI.equals(a.getNamespaceURI()))
                     continue;
-                if (sb.length() > 0)
+                if (!sb.isEmpty())
                     sb.append("; ");
                 sb.append(a.getName()).append('=').append(a.getValue());
             }
@@ -1098,6 +1214,7 @@ public final class InvoiceData {
         Node stop = field.element.getParentNode();
         while (stop instanceof Element se && !STRUCTURE.contains(se.getLocalName()))
             stop = stop.getParentNode();
-        CiiXml.removeAndPrune(field.element, (Element) stop);
+        if ( stop instanceof Element stopElement)
+            CiiXml.removeAndPrune(field.element, stopElement);
     }
 }
