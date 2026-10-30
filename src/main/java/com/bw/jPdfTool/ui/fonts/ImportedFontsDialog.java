@@ -1,12 +1,14 @@
 package com.bw.jPdfTool.ui.fonts;
 
 import com.bw.jPdfTool.fonts.ImportedFont;
+import com.bw.jPdfTool.fonts.PdfFontEmbedder;
 import com.bw.jPdfTool.fonts.ImportedFonts;
 import com.bw.jPdfTool.Log;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
+import javax.swing.DefaultListSelectionModel;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
@@ -43,7 +45,7 @@ public final class ImportedFontsDialog {
     }
 
     static void show(Component parent, Path store) {
-        JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(parent), "Imported Fonts",
+        JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(parent), "Manage Fonts",
                 JDialog.ModalityType.APPLICATION_MODAL);
 
         DefaultListModel<ImportedFont> model = new DefaultListModel<>();
@@ -72,7 +74,36 @@ public final class ImportedFontsDialog {
             }
         });
         JScrollPane scroll = new JScrollPane(list);
-        scroll.setPreferredSize(new Dimension(560, 240));
+        scroll.setPreferredSize(new Dimension(560, 200));
+        scroll.setBorder(BorderFactory.createTitledBorder("Imported fonts"));
+
+        // Read only: the bundled fonts can't be changed, so nothing can be selected.
+        DefaultListModel<PdfFontEmbedder.Variant> bundledModel = new DefaultListModel<>();
+        bundledModel.addAll(PdfFontEmbedder.bundled());
+        JList<PdfFontEmbedder.Variant> bundledList = new JList<>(bundledModel);
+        bundledList.setSelectionModel(new DefaultListSelectionModel() {
+            @Override
+            public void setSelectionInterval(int index0, int index1) {
+            }
+
+            @Override
+            public void addSelectionInterval(int index0, int index1) {
+            }
+        });
+        bundledList.setFocusable(false);
+        bundledList.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> l, Object value, int index, boolean isSelected, boolean cellHasFocus) {
+                String text = "";
+                if (value instanceof PdfFontEmbedder.Variant v)
+                    text = "<html><b>" + escape(v.displayName()) + "</b> <font size='-1'>&ndash; "
+                            + escape(v.family().description) + "</font></html>";
+                return super.getListCellRendererComponent(l, text, index, false, false);
+            }
+        });
+        JScrollPane bundledScroll = new JScrollPane(bundledList);
+        bundledScroll.setPreferredSize(new Dimension(560, 130));
+        bundledScroll.setBorder(BorderFactory.createTitledBorder("Bundled fonts (read only)"));
 
         JButton add = new JButton("Add…");
         add.setToolTipText("Imports TrueType font files (.ttf).");
@@ -121,7 +152,10 @@ public final class ImportedFontsDialog {
         JPanel content = new JPanel(new BorderLayout());
         content.setBorder(BorderFactory.createEmptyBorder(12, 14, 12, 14));
         content.add(info, BorderLayout.NORTH);
-        content.add(scroll, BorderLayout.CENTER);
+        JPanel lists = new JPanel(new BorderLayout());
+        lists.add(bundledScroll, BorderLayout.NORTH);
+        lists.add(scroll, BorderLayout.CENTER);
+        content.add(lists, BorderLayout.CENTER);
         JPanel south = new JPanel(new BorderLayout());
         south.setBorder(BorderFactory.createEmptyBorder(8, 0, 0, 0));
         south.add(buttons, BorderLayout.EAST);

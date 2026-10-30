@@ -113,6 +113,11 @@ public class Main implements Callable<Integer> {
             "Validates the resulting PDF and its invoice (PDF/A-3 and EN 16931). Can't be combined with '--split'.")
     private boolean validateInvoice = false;
 
+    @Option(names = {"-vp", "--validatePdfa"}, description =
+            "Validates the resulting PDF with veraPDF against the PDF/A flavour it declares (a PDF without declaration is reported as such). "
+                    + "Can't be combined with '--split'.")
+    private boolean validatePdfa = false;
+
     @Option(names = {"--debug"}, description = "Shows debug output and stack traces. Also possible with the system property 'jpdftool.debug=true'. Can be used together with file names to start the UI in debug mode.")
     private boolean debug = false;
 
@@ -255,8 +260,8 @@ public class Main implements Callable<Integer> {
                 return 6;
             }
 
-            if (validateInvoice && splitToPagesPerFile > 0) {
-                System.err.println("'--validateInvoice' can't be combined with '--split'.");
+            if ((validateInvoice || validatePdfa) && splitToPagesPerFile > 0) {
+                System.err.println("'--validateInvoice' and '--validatePdfa' can't be combined with '--split'.");
                 usage(System.err);
                 return 7;
             }
@@ -348,6 +353,22 @@ public class Main implements Callable<Integer> {
                     return 12;
                 }
                 System.out.println("The resulting document is a valid invoice.");
+            }
+
+            if (validatePdfa) {
+                ValidationResult result;
+                try {
+                    result = executer.validatePdfa(outfile);
+                } catch (Exception e) {
+                    System.err.println("Validation failed: " + e.getMessage());
+                    return 11;
+                }
+                result.toLines().forEach(System.err::println);
+                if (!result.isConform()) {
+                    System.err.println("The resulting document is not PDF/A conform.");
+                    return 15;
+                }
+                System.out.println("The resulting document is PDF/A conform.");
             }
 
 

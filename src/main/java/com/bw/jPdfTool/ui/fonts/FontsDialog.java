@@ -322,7 +322,7 @@ public final class FontsDialog {
             previewScroll.setPreferredSize(PREVIEW_SIZE);
             previewScroll.setMinimumSize(PREVIEW_SIZE);
 
-            JButton imported = new JButton("Imported Fonts…");
+            JButton imported = new JButton("Manage Fonts…");
             imported.setToolTipText("Adds font files of your own to the list, or removes them.");
             imported.addActionListener(e -> {
                 ImportedFontsDialog.show(this, store);

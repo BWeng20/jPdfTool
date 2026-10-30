@@ -288,7 +288,7 @@ public class PageWidgetContainer extends JComponent {
     }
 
     public void setErrorText(String error) {
-        // TODO
+        Log.error("Failed to load the document: %s", error);
     }
 
 }

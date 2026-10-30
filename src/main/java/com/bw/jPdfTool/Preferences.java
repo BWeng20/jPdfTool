@@ -47,6 +47,11 @@ public class Preferences {
     public final static String USER_PREF_STORE_PASSWORDS = "store-passwords";
 
     /**
+     * User preferences key for asking before exit if the document is modified (default true).
+     */
+    public final static String USER_PREF_CONFIRM_EXIT = "confirm-exit-if-modified";
+
+    /**
      * User preferences key for the Encryption Key Length.
      */
     public final static String USER_ENCRYPTION_KEY_LENGTH = "encryption-key-length";

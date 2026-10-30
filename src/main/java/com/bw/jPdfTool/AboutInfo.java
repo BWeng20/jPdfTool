@@ -5,7 +5,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 
 /**
  * The data of the About dialog: version, build, license and the environment the tool runs in.
@@ -32,28 +31,7 @@ public final class AboutInfo {
 
     private static final String APACHE = "Apache License 2.0";
     private static final String APACHE_URL = "https://www.apache.org/licenses/LICENSE-2.0";
-    private static final String BOUNCY = "Bouncy Castle Licence (MIT)";
-    private static final String BOUNCY_URL = "https://www.bouncycastle.org/licence.html";
     private static final String UNKNOWN = "unknown";
-
-    /**
-     * The license of each direct dependency as {license name, url}. Keep it in sync with build.gradle,
-     * a test fails for libraries which are missing here.
-     */
-    private static final Map<String, String[]> LIBRARY_LICENSES = Map.ofEntries(
-            Map.entry("com.formdev:flatlaf", new String[]{APACHE, APACHE_URL}),
-            Map.entry("com.formdev:flatlaf-fonts-roboto", new String[]{APACHE, APACHE_URL}),
-            Map.entry("io.github.bweng20:jSVGIcon", new String[]{"The Unlicense (public domain)", LICENSE_URL}),
-            Map.entry("org.bouncycastle:bcprov-jdk18on", new String[]{BOUNCY, BOUNCY_URL}),
-            Map.entry("org.bouncycastle:bcpkix-jdk18on", new String[]{BOUNCY, BOUNCY_URL}),
-            Map.entry("org.apache.pdfbox:pdfbox", new String[]{APACHE, APACHE_URL}),
-            Map.entry("org.apache.pdfbox:fontbox", new String[]{APACHE, APACHE_URL}),
-            Map.entry("commons-logging:commons-logging", new String[]{APACHE, APACHE_URL}),
-            Map.entry("org.mustangproject:library", new String[]{APACHE, APACHE_URL}),
-            Map.entry("org.mustangproject:validator", new String[]{APACHE, APACHE_URL}),
-            Map.entry("org.slf4j:slf4j-nop", new String[]{"MIT License", "https://www.slf4j.org/license.html"}),
-            Map.entry("com.fasterxml.jackson.core:jackson-databind", new String[]{APACHE, APACHE_URL}),
-            Map.entry("info.picocli:picocli", new String[]{APACHE, APACHE_URL}));
 
     /**
      * The fonts which are embedded into PDF/A documents instead of missing ones, see PdfFontEmbedder.
@@ -71,18 +49,27 @@ public final class AboutInfo {
      */
     public static List<Component> components() {
         List<Component> result = new ArrayList<>();
-        for (String l : BuildVersion.LIBRARIES) {
+        for (int n = 0; n < BuildVersion.LIBRARIES.length; ++n) {
+            String l = BuildVersion.LIBRARIES[n];
             int i = l.lastIndexOf(':');
-            String name = i < 0 ? l : l.substring(0, i);
-            String[] license = LIBRARY_LICENSES.getOrDefault(name, new String[]{UNKNOWN, null});
-            result.add(new Component(name, i < 0 ? "" : l.substring(i + 1), license[0], license[1]));
+            // The license is taken from the POM of the library by the build, see generateVersion in build.gradle.
+            String[] license = BuildVersion.LICENSES[n].split("\\|", -1);
+            if (license[0].contains("MPL-2.0") && license[0].contains("GPL")) {
+                // Dual licensed (veraPDF): the tool uses it under the MPL.
+                result.add(new Component(i < 0 ? l : l.substring(0, i), i < 0 ? "" : l.substring(i + 1),
+                        "MPL 2.0 (dual licensed with GPL 3, used under MPL)", "https://www.mozilla.org/MPL/2.0/"));
+                continue;
+            }
+            boolean known = !license[0].isEmpty();
+            result.add(new Component(i < 0 ? l : l.substring(0, i), i < 0 ? "" : l.substring(i + 1),
+                    known ? license[0] : UNKNOWN, known && license.length > 1 && !license[1].isEmpty() ? license[1] : null));
         }
         result.addAll(FONTS);
         return result;
     }
 
     /**
-     * The libraries the tool uses directly, e.g. "org.apache.pdfbox:pdfbox 3.0.8", sorted.
+     * The libraries the tool contains (direct and transitive), e.g. "org.apache.pdfbox:pdfbox 3.0.8", sorted.
      */
     public static List<String> libraries() {
         return Arrays.stream(BuildVersion.LIBRARIES).map(l -> {

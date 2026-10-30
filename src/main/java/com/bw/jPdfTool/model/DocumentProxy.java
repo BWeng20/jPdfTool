@@ -8,6 +8,7 @@ import com.bw.jPdfTool.fonts.PdfFontEmbedder;
 import com.bw.jPdfTool.fonts.PdfFontMerger;
 import com.bw.jPdfTool.fonts.PdfFonts;
 import com.bw.jPdfTool.PdfRisk;
+import com.bw.jPdfTool.PdfStandardProfile;
 import com.bw.jPdfTool.PdfStandard;
 import com.bw.jPdfTool.Preferences;
 import com.bw.jPdfTool.Redactor;
@@ -41,6 +42,22 @@ import java.util.Map;
 public class DocumentProxy {
 
     public final List<Page> pages = new ArrayList<>();
+
+    /**
+     * True if the document was changed since it was loaded or {@link #clearModified} was called.
+     */
+    private volatile boolean modified;
+
+    public boolean isModified() {
+        return modified;
+    }
+
+    /**
+     * Call after the document was saved.
+     */
+    public void clearModified() {
+        modified = false;
+    }
     private final List<DocumentConsumer> docConsumerList = new ArrayList<>();
     private boolean closed = false;
     private PDDocument document;
@@ -57,6 +74,13 @@ public class DocumentProxy {
      * Returns an error message to refuse the document, null to accept it.
      */
     public java.util.function.Function<PDDocument, String> appendCheck;
+
+    /**
+     * Optional check before an invoice is added (attached, or by appending a document that has one): an invoice needs
+     * PDF/A-3, so the hook may ask whether the document can be switched, and does so.
+     * Returns an error message to abort the operation, null to continue.
+     */
+    public java.util.function.Supplier<String> invoiceStandardCheck;
 
     /**
      * Called (from any thread) with what was changed if the document had to be fixed for PDF/A before an
@@ -317,6 +341,7 @@ public class DocumentProxy {
                     pages.add(page);
                 }
             }
+            modified = true;
             refirePages();
         }
     }
@@ -349,6 +374,7 @@ public class DocumentProxy {
             p.scale = 0;
             PDPage pd = document.getPage(pageIndex);
             pd.setRotation(pd.getRotation() + degree);
+            modified = true;
             refirePages();
         }
     }
@@ -363,6 +389,7 @@ public class DocumentProxy {
             PDPage pd = document.getPage(pageIndex);
             pd.setRotation(pd.getRotation() + degree);
         }
+        modified = true;
         refirePages();
     }
 
@@ -404,6 +431,7 @@ public class DocumentProxy {
             try {
                 final boolean tagged = PdfRisk.isTagged(document);
                 renderPageToImage(pdfRenderer, pageIndex);
+                modified = true;
                 // The page is an image now, its tags are gone.
                 reportRisks("To Image", PdfRisk.tagsLost(tagged, null));
                 refirePages();
@@ -421,6 +449,7 @@ public class DocumentProxy {
             for (int pageIndex = 0; pageIndex < document.getNumberOfPages(); ++pageIndex) {
                 renderPageToImage(pdfRenderer, pageIndex);
             }
+            modified = true;
             reportRisks("To Image", PdfRisk.tagsLost(tagged, null));
         } catch (Exception e) {
             Log.exception(e);
@@ -439,6 +468,8 @@ public class DocumentProxy {
         Preferences prefs = Preferences.getInstance();
         final boolean tagged = PdfRisk.isTagged(document);
         Redactor.redact(document, regions, prefs.getDpi(), prefs.getRedactionColor());
+        if (!regions.isEmpty())
+            modified = true;
         // The redacted pages are images now, their tags are gone.
         if (!regions.isEmpty())
             reportRisks("Redaction", PdfRisk.tagsLost(tagged, null));
@@ -462,6 +493,9 @@ public class DocumentProxy {
      */
     public void attachInvoice(byte[] xml) throws IOException {
         ensuredDocument();
+        String refused = invoiceStandardCheck == null ? null : invoiceStandardCheck.get();
+        if (refused != null)
+            throw new EInvoice.NotConformException(refused);
         Map<String, Integer> changes;
         try {
             changes = fixPdfa();
@@ -479,6 +513,7 @@ public class DocumentProxy {
             document = newDocument;
         }
         IOUtils.closeQuietly(oldDocument);
+        modified = true;
         fireDocumentLoaded();
     }
 
@@ -491,9 +526,98 @@ public class DocumentProxy {
     public Map<String, Integer> fixPdfa() throws IOException {
         ensuredDocument();
         Map<String, Integer> changes = PdfStandard.fixPdfaIssues(document);
-        if (!changes.isEmpty())
+        if (!changes.isEmpty()) {
+            modified = true;
             redrawAllPages();
+        }
         return changes;
+    }
+
+    /**
+     * Runs the metadata fixer of veraPDF on the document, if it declares PDF/A. The fixed document replaces the
+     * current one, unless veraPDF could not repair it, see {@link com.bw.jPdfTool.PdfaValidator.MetadataFix#applied}.
+     * The thumbnails are redrawn if the document was changed. The listeners are not told: the caller shows the result.
+     *
+     * @return What veraPDF did, the fixes are empty if it changed nothing.
+     */
+    public com.bw.jPdfTool.PdfaValidator.MetadataFix fixWithVeraPdf() throws IOException {
+        ensuredDocument();
+        Map<String, Integer> changes = new java.util.LinkedHashMap<>();
+        com.bw.jPdfTool.PdfaValidator.MetadataFix fix = applyVeraPdfFixer(changes);
+        if (!changes.isEmpty()) {
+            modified = true;
+            redrawAllPages();
+        }
+        return fix;
+    }
+
+    private com.bw.jPdfTool.PdfaValidator.MetadataFix applyVeraPdfFixer(Map<String, Integer> changes)
+            throws IOException {
+        if (PdfStandard.pdfaPart(document) == 0)
+            return new com.bw.jPdfTool.PdfaValidator.MetadataFix(null, "The document declares no PDF/A", List.of());
+        com.bw.jPdfTool.PdfaValidator.MetadataFix fix = com.bw.jPdfTool.PdfaValidator.fixMetadata(getBytes());
+        Log.info("veraPDF metadata fixer: %s %s", fix.status(), fix.fixes());
+        if (fix.pdf() == null)
+            return fix;
+        PDDocument fixed = Loader.loadPDF(fix.pdf());
+        PDDocument old;
+        synchronized (this) {
+            old = document;
+            document = fixed;
+        }
+        IOUtils.closeQuietly(old);
+        fix.fixes().forEach(f -> changes.merge("veraPDF: " + f, 1, Integer::sum));
+        if (fix.fixes().isEmpty())
+            changes.merge("veraPDF: metadata fixed", 1, Integer::sum);
+        return fix;
+    }
+
+    /**
+     * Shows what {@link #fixPdfa} would change, without touching the document.
+     *
+     * @return What would be changed and how often, empty if nothing or if the document declares no PDF/A.
+     */
+    public Map<String, Integer> previewPdfaRepair() throws IOException {
+        ensuredDocument();
+        PdfStandardProfile profile = PdfStandard.profile(document);
+        return profile == null || !profile.isPdfa() ? Map.of() : PdfStandard.preview(getBytes(), profile);
+    }
+
+    /**
+     * Converts the document to a PDF/A level, see {@link PdfStandard#convertTo}. The thumbnails are redrawn and
+     * listeners are told if the document was changed.
+     *
+     * @param target The level, null to remove the PDF/A declaration.
+     * @return What was changed and how often, empty if nothing.
+     */
+    public Map<String, Integer> convertToStandard(PdfStandardProfile target) throws IOException {
+        Map<String, Integer> changes = convertToStandardQuietly(target);
+        if (!changes.isEmpty())
+            fireDocumentLoaded();
+        return changes;
+    }
+
+    /**
+     * Like {@link #convertToStandard}, but the listeners are not told: for operations which continue with the document.
+     */
+    public Map<String, Integer> convertToStandardQuietly(PdfStandardProfile target) throws IOException {
+        ensuredDocument();
+        Map<String, Integer> changes = PdfStandard.convertTo(document, target);
+        if (!changes.isEmpty()) {
+            modified = true;
+            redrawAllPages();
+        }
+        return changes;
+    }
+
+    /**
+     * Checks the document with veraPDF, see {@link com.bw.jPdfTool.PdfaValidator}.
+     *
+     * @return The result of the verification.
+     */
+    public com.bw.jPdfTool.ValidationResult validatePdfa() throws IOException {
+        ensuredDocument();
+        return com.bw.jPdfTool.PdfaValidator.validate(getBytes());
     }
 
     /**
@@ -545,7 +669,10 @@ public class DocumentProxy {
      */
     public PdfFontMerger.Result mergeDuplicateFonts() throws IOException {
         ensuredDocument();
-        return PdfFontMerger.merge(document);
+        PdfFontMerger.Result result = PdfFontMerger.merge(document);
+        if (result.groups() > 0)
+            modified = true;
+        return result;
     }
 
     /**
@@ -557,6 +684,7 @@ public class DocumentProxy {
     public void replaceFont(org.apache.pdfbox.cos.COSDictionary font, FontSource source) throws IOException {
         ensuredDocument();
         PdfFontEmbedder.replace(document, font, source);
+        modified = true;
         redrawAllPages();
     }
 
@@ -568,6 +696,8 @@ public class DocumentProxy {
     public boolean removeInvoice() throws IOException {
         ensuredDocument();
         boolean removed = EInvoice.removeXml(document);
+        if (removed)
+            modified = true;
         if (removed)
             // Let the UI update what depends on the invoice (e.g. the standards label).
             fireDocumentLoaded();
@@ -584,6 +714,7 @@ public class DocumentProxy {
 
             // 0-based index!
             document.removePage(pageIndex);
+            modified = true;
             pages.remove(pageIndex);
             int pageCount = pages.size();
             for (int i = 0; i < pageCount; ++i) {
@@ -675,6 +806,7 @@ public class DocumentProxy {
                             final boolean tagged = PdfRisk.isTagged(this.getDocument()) || PdfRisk.isTagged(document);
                             PDFMergerUtility pdfMergerUtility = new PDFMergerUtility();
                             pdfMergerUtility.appendDocument(this.getDocument(), document);
+                            modified = true;
                             reportRisks("Merge", PdfRisk.tagsLost(tagged, this.getDocument()));
                         } catch (Exception e) {
                             Log.error("Failed to merge. %s", e.getMessage());

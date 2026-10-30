@@ -12,6 +12,7 @@ import com.bw.jPdfTool.invoice.EInvoice;
 import com.bw.jPdfTool.Log;
 import com.bw.jPdfTool.PdfRisk;
 import com.bw.jPdfTool.PdfStandard;
+import com.bw.jPdfTool.PdfStandardProfile;
 import com.bw.jPdfTool.Main;
 import com.bw.jPdfTool.Preferences;
 import com.bw.jPdfTool.Redactor;
@@ -24,10 +25,7 @@ import com.bw.jPdfTool.model.RenderQueue;
 import com.bw.jPdfTool.toast.Toast;
 import com.bw.jPdfTool.toast.ToastType;
 import com.bw.jPdfTool.toast.Toaster;
-import com.bw.jPdfTool.ui.invoice.InvoiceDialog;
-import com.bw.jPdfTool.ui.invoice.InvoiceEditorDialog;
-import com.bw.jPdfTool.ui.invoice.PartySettingsDialog;
-import com.bw.jPdfTool.ui.invoice.ValidationDialog;
+import com.bw.jPdfTool.ValidationResult;
 import com.bw.jtools.svg.SVGConverter;
 import com.bw.jtools.ui.ShapeIcon;
 import com.bw.jtools.ui.ShapeMultiResolutionImage;
@@ -107,6 +105,7 @@ public class UI extends JSplitPane {
 
     private final PageWidgetContainer pages = new PageWidgetContainer();
     protected DocumentProxy documentProxy;
+    private final InvoiceActions invoiceActions = new InvoiceActions(this, () -> documentProxy, () -> toaster);
     private PageWidget selectedPage;
 
     private final JTextField pageCount = new JTextField(4);
@@ -118,16 +117,33 @@ public class UI extends JSplitPane {
             setForeground(UIManager.getColor("Label.disabledForeground"));
         }
     };
-    private final JCheckBox pdfA3 = new JCheckBox("PDF/A-3");
+    private final JButton standardButton = new JButton("PDF Standard...");
     private final JButton generateOwner = new JButton("<html><body>Generate<br>Owner Password</body></html>");
     /**
-     * Set for a new main document: the PDF/A-3 option is set from the first loaded document.
+     * If the effective document declares PDF/A. Everything that would violate PDF/A is disabled then.
      */
-    private boolean pdfaFromDocument;
+    private volatile boolean pdfaMode;
     /**
-     * If the effective document contained an invoice at the last update. Adding one turns on PDF/A-3.
+     * Set for a new main document until it is loaded: a loaded document is not repaired.
+     */
+    private boolean initialLoad;
+    /**
+     * If the effective document contained an invoice at the last update. Adding one repairs the document.
      */
     private boolean hadInvoice;
+    /**
+     * True while the standard is switched: the check of the result is part of the switch.
+     */
+    private volatile boolean switchingStandard;
+    /**
+     * True while the PDF/A check runs.
+     */
+    private final java.util.concurrent.atomic.AtomicBoolean pdfaChecking = new java.util.concurrent.atomic.AtomicBoolean();
+    /**
+     * The violations the user was told about, so they are not shown again for the same document.
+     */
+    private DocumentProxy reportedProxy;
+    private ValidationResult reportedResult = ValidationResult.conform();
     private final JCheckBox useDocumentInformation = new JCheckBox("Use Information from first loaded Document");
     private final JButton clearInformation = new JButton("Clear Information");
     private final JTextField title = new JTextField(15);
@@ -626,16 +642,15 @@ public class UI extends JSplitPane {
         pageCountRow.setOpaque(false);
         pageCountRow.add(pageCount);
         pageCountRow.add(Box.createHorizontalStrut(10));
-        pdfA3.setOpaque(false);
-        pdfA3.setToolTipText("<html>Keeps the document PDF/A-3 conform, as required for e-invoices (ZUGFeRD/Factur-X).<br>"
-                + "Everything that would violate the standard is disabled: passwords, permissions and<br>"
-                + "encryption, splitting, appending documents that are no PDF/A, and converting pages<br>"
-                + "to images if the document has a non-RGB output intent.<br>"
-                + "A document without output intent gets an sRGB output intent.<br>"
-                + "The loaded document must already be PDF/A-3, converting is not supported.<br>"
-                + "Set automatically when a PDF/A-3 document or an e-invoice is opened, or an invoice is added.</html>");
-        pdfA3.addItemListener(e -> updatePdfAState());
-        pageCountRow.add(pdfA3);
+        standardButton.setEnabled(false);
+        standardButton.setToolTipText("<html>Changes the PDF/A level of the document (the current level is shown beside).<br>"
+                + "The dialog shows what is changed and what is lost.<br>"
+                + "A document that declares PDF/A is kept conform: passwords, permissions and encryption, splitting,<br>"
+                + "appending documents that are no PDF/A, and converting pages to images with a non-RGB output intent<br>"
+                + "are disabled. A loaded document is only repaired if you agree. Adding an invoice needs PDF/A-3:<br>"
+                + "you are asked to switch the document, otherwise the operation is aborted.</html>");
+        standardButton.addActionListener(e -> doChangeStandard());
+        pageCountRow.add(standardButton);
         pageCountRow.add(Box.createHorizontalStrut(10));
         pageCountRow.add(pdfStandard);
         documentPanel.add(pageCountRow, gc);
@@ -925,6 +940,7 @@ public class UI extends JSplitPane {
     private final JRadioButtonMenuItem lafCross = new JRadioButtonMenuItem("Cross Platform");
 
     private final JCheckBox storePasswords = new JCheckBox("Remember Passwords");
+    private final JCheckBox confirmExit = new JCheckBox("Confirm exit if modified");
 
     private final JPrefCheckBoxMenuItem viewQualityAA
             = new JPrefCheckBoxMenuItem("Antialiasing", Preferences.USER_PREF_VIEWER_ANTIALIASING,
@@ -1034,6 +1050,10 @@ public class UI extends JSplitPane {
                             "on Linux/macOS in a file in your home directory). Every program running<br>" +
                             "under your account can read them. Don't use this on shared computers." +
                             "</html>");
+            confirmExit.setToolTipText("Asks to write the document when the program is closed and it has unwritten changes.");
+            confirmExit.addActionListener(e ->
+                    Preferences.getInstance().set(Preferences.USER_PREF_CONFIRM_EXIT, confirmExit.isSelected()));
+
             storePasswords.addActionListener(e -> {
                 boolean sop = storePasswords.isSelected();
                 var prefs = Preferences.getInstance();
@@ -1080,16 +1100,11 @@ public class UI extends JSplitPane {
 
             JMenu options = new JMenu("Options");
             options.add(storePasswords);
+            options.add(confirmExit);
             options.add(encryptionKeyLengthMenu);
             options.add(laf);
             options.add(renderQuality);
             options.add(redactionColor);
-
-            options.addSeparator();
-            JMenuItem parties = new JMenuItem("Invoice Parties…");
-            parties.setToolTipText("Seller and buyer presets for the invoice editor.");
-            parties.addActionListener(e -> PartySettingsDialog.showDialog(this));
-            options.add(parties);
 
             if (Log.isDebug()) {
                 JMenu viewerQuality = new JMenu("Viewer Quality (debug mode)");
@@ -1115,7 +1130,8 @@ public class UI extends JSplitPane {
             }
             menuBar.add(options);
             menuBar.add(createFontsMenu());
-            menuBar.add(createInvoiceMenu());
+            menuBar.add(invoiceActions.createValidationMenu());
+            menuBar.add(invoiceActions.createInvoiceMenu());
             JMenu help = new JMenu("Help");
             JMenuItem manual = new JMenuItem("Manual");
             manual.setToolTipText("Opens the README as PDF.");
@@ -1142,6 +1158,7 @@ public class UI extends JSplitPane {
 
         storePasswords.setSelected(Preferences.getInstance().getBoolean(
                 Preferences.USER_PREF_STORE_PASSWORDS, false));
+        confirmExit.setSelected(Preferences.getInstance().getBoolean(Preferences.USER_PREF_CONFIRM_EXIT, true));
         return menuBar;
     }
 
@@ -1294,7 +1311,7 @@ public class UI extends JSplitPane {
                     try {
                         documentProxy.removeInvoice();
                     } catch (IOException e) {
-                        invoiceError("Failed to remove invoice", e);
+                        invoiceActions.invoiceError("Failed to remove invoice", e);
                         return;
                     }
                 } else if (choice != 1) {
@@ -1316,10 +1333,6 @@ public class UI extends JSplitPane {
         }
     }
 
-    private static final String ATTACH_INVOICE = "Attach Invoice XML…";
-    private static final String ATTACH_INVOICE_TOOLTIP =
-            "Attaches a ZUGFeRD/Factur-X (CII) XML. An existing invoice is replaced.";
-
     /**
      * Creates the menu to show the fonts of the document and to replace them.
      */
@@ -1332,7 +1345,7 @@ public class UI extends JSplitPane {
                 FontsDialog.show(this, documentProxy);
         });
         menu.add(show);
-        JMenuItem imported = new JMenuItem("Imported Fonts…");
+        JMenuItem imported = new JMenuItem("Manage Fonts…");
         imported.setToolTipText("Font files of your own, which can replace the fonts of a document.");
         imported.addActionListener(e -> ImportedFontsDialog.show(this));
         menu.add(imported);
@@ -1353,203 +1366,6 @@ public class UI extends JSplitPane {
         return menu;
     }
 
-    /**
-     * Creates the menu with the e-invoice (ZUGFeRD/Factur-X) actions.
-     */
-    private JMenu createInvoiceMenu() {
-        JMenu menu = new JMenu("Invoice");
-
-        JMenuItem show = new JMenuItem("Show Invoice…");
-        show.addActionListener(e -> doShowInvoice());
-        JMenuItem edit = new JMenuItem("Create Invoice…");
-        edit.addActionListener(e -> doEditInvoice());
-        JMenuItem validate = new JMenuItem("Validate…");
-        validate.setToolTipText("Checks PDF/A-3 and the EN 16931 rules of the current document.");
-        validate.addActionListener(e -> doValidateInvoice());
-        JMenuItem save = new JMenuItem("Save Invoice XML…");
-        save.addActionListener(e -> doSaveInvoiceXml());
-        JMenuItem attach = new JMenuItem(ATTACH_INVOICE);
-        attach.setToolTipText(ATTACH_INVOICE_TOOLTIP);
-        attach.addActionListener(e -> doAttachInvoiceXml());
-        JMenuItem remove = new JMenuItem("Remove Invoice");
-        remove.addActionListener(e -> doRemoveInvoice());
-
-        menu.add(show);
-        menu.add(edit);
-        menu.add(validate);
-        menu.addSeparator();
-        menu.add(save);
-        menu.add(attach);
-        menu.add(remove);
-
-        menu.addMenuListener(new MenuListener() {
-            @Override
-            public void menuSelected(MenuEvent e) {
-                boolean hasDocument = documentProxy != null && documentProxy.getDocument() != null;
-                boolean hasInvoice = hasDocument && EInvoice.hasInvoice(documentProxy.getDocument());
-                show.setEnabled(hasInvoice);
-                save.setEnabled(hasInvoice);
-                remove.setEnabled(hasInvoice);
-                validate.setEnabled(hasDocument);
-
-                boolean supported = hasDocument && EInvoice.supportsInvoice(documentProxy.getDocument());
-                attach.setEnabled(supported);
-                edit.setEnabled(supported);
-                edit.setText(hasInvoice ? "Edit Invoice…" : "Create Invoice…");
-                edit.setToolTipText(hasDocument && !supported
-                        ? "<html>E-invoices need PDF/A-3, which is based on PDF 1.7.<br>A PDF 2.0 document can't be conform.</html>"
-                        : "Enter the invoice data. The invoice is attached as ZUGFeRD/Factur-X XML.");
-                if (hasDocument && !supported) {
-                    attach.setText(ATTACH_INVOICE + " (not for PDF 2.0)");
-                    attach.setToolTipText("<html>E-invoices need PDF/A-3, which is based on PDF 1.7.<br>"
-                            + "A PDF 2.0 document can't be conform.</html>");
-                } else {
-                    attach.setText(ATTACH_INVOICE);
-                    attach.setToolTipText(ATTACH_INVOICE_TOOLTIP);
-                }
-            }
-
-            @Override
-            public void menuDeselected(MenuEvent e) {
-            }
-
-            @Override
-            public void menuCanceled(MenuEvent e) {
-            }
-        });
-        return menu;
-    }
-
-    private void showText(String title, String text) {
-        JTextArea area = new JTextArea(text, 24, 90);
-        area.setEditable(false);
-        area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, area.getFont().getSize()));
-        area.setCaretPosition(0);
-        JOptionPane.showMessageDialog(this, new JScrollPane(area), title, JOptionPane.PLAIN_MESSAGE);
-    }
-
-    /**
-     * Reports an error. Long or multi-line messages (e.g. validation results) don't fit into a toast,
-     * they are shown in a dialog.
-     */
-    private void invoiceError(String what, Exception e) {
-        Log.exception(e);
-        String message = e.getMessage() == null ? e.toString() : e.getMessage();
-        if (message.length() > 80 || message.indexOf('\n') >= 0) {
-            toaster.toast(ToastType.ERROR, 10000,
-                    "<html><font size='+2'>%s</font><br><font size='+1'><i>See the details dialog</i></font></html>", what);
-            SwingUtilities.invokeLater(() -> showText(what, message));
-        } else {
-            toaster.toast(ToastType.ERROR, 20000,
-                    "<html><font size='+2'>%s</font><br><font size='+1'><i>%s</i></font></html>", what, message);
-        }
-    }
-
-    protected void doShowInvoice() {
-        if (documentProxy == null || documentProxy.getDocument() == null)
-            return;
-        try {
-            var xml = EInvoice.extractXml(documentProxy.getDocument());
-            if (xml.isEmpty()) {
-                toaster.toast(ToastType.INFO, 5000, "<html>The document contains no invoice</html>");
-                return;
-            }
-            InvoiceDialog.showDialog(this, xml.get());
-        } catch (IOException e) {
-            invoiceError("Failed to read invoice", e);
-        }
-    }
-
-    /**
-     * Opens the invoice editor. Edits the existing invoice of the document or creates a new one.
-     */
-    protected void doEditInvoice() {
-        if (documentProxy == null || documentProxy.getDocument() == null)
-            return;
-        byte[] xml;
-        try {
-            xml = EInvoice.extractXml(documentProxy.getDocument()).orElse(null);
-        } catch (IOException e) {
-            invoiceError("Failed to read invoice", e);
-            return;
-        }
-        if (InvoiceEditorDialog.showDialog(this, xml, documentProxy))
-            toaster.toast(ToastType.SUCCESS, 5000, "<html>%s invoice</html>", xml == null ? "Attached" : "Updated");
-    }
-
-    protected void doValidateInvoice() {
-        if (documentProxy == null || documentProxy.getDocument() == null)
-            return;
-        runInBusy(() -> {
-            try {
-                EInvoice.Validation v = EInvoice.validate(documentProxy.getBytes(), "current document");
-                SwingUtilities.invokeLater(() -> ValidationDialog.showDialog(this, v));
-            } catch (Exception e) {
-                invoiceError("Validation failed", e);
-            }
-        });
-    }
-
-    private File chooseXml(boolean save) {
-        JFileChooser chooser = new JFileChooser();
-        String lastDir = getPref(Preferences.USER_PREF_LAST_PDF_DIR, null);
-        if (lastDir != null)
-            chooser.setCurrentDirectory(new File(lastDir));
-        chooser.setFileFilter(new FileNameExtensionFilter("XML", "xml"));
-        chooser.setMultiSelectionEnabled(false);
-        if (save) {
-            chooser.setDialogTitle("Save Invoice XML…");
-            chooser.setSelectedFile(new File(chooser.getCurrentDirectory(), "factur-x.xml"));
-        } else {
-            chooser.setDialogTitle("Select Invoice XML…");
-        }
-        int result = save ? chooser.showSaveDialog(this) : chooser.showOpenDialog(this);
-        return result == JFileChooser.APPROVE_OPTION ? chooser.getSelectedFile() : null;
-    }
-
-    protected void doSaveInvoiceXml() {
-        if (documentProxy == null || documentProxy.getDocument() == null)
-            return;
-        try {
-            var xml = EInvoice.extractXml(documentProxy.getDocument());
-            if (xml.isEmpty())
-                return;
-            File file = chooseXml(true);
-            if (file != null && (!file.exists() || askOverwrite(this, file.toPath()))) {
-                Files.write(file.toPath(), xml.get());
-                toaster.toast(ToastType.SUCCESS, 5000, "<html>Stored invoice to<br><i>%s</i></html>", file.getName());
-            }
-        } catch (IOException e) {
-            invoiceError("Failed to store invoice", e);
-        }
-    }
-
-    protected void doAttachInvoiceXml() {
-        if (documentProxy == null || documentProxy.getDocument() == null)
-            return;
-        File file = chooseXml(false);
-        if (file != null) {
-            runInBusy(() -> {
-                try {
-                    documentProxy.attachInvoice(Files.readAllBytes(file.toPath()));
-                    toaster.toast(ToastType.SUCCESS, 5000, "<html>Attached invoice<br><i>%s</i></html>", file.getName());
-                } catch (Exception e) {
-                    invoiceError("Failed to attach invoice", e);
-                }
-            });
-        }
-    }
-
-    protected void doRemoveInvoice() {
-        if (documentProxy == null || documentProxy.getDocument() == null)
-            return;
-        try {
-            if (documentProxy.removeInvoice())
-                toaster.toast(ToastType.SUCCESS, 5000, "<html>Removed invoice</html>");
-        } catch (IOException e) {
-            invoiceError("Failed to remove invoice", e);
-        }
-    }
 
     /**
      * Renders all pages as images.
@@ -1564,24 +1380,14 @@ public class UI extends JSplitPane {
 
     /**
      * Gets the passwords for saving.<br>
-     * With the PDF/A-3 option, the password fields are disabled and nothing is encrypted. Otherwise the passwords
-     * are used as entered. If that makes an e-invoice invalid, a warning is shown.
+     * A document that declares PDF/A is written without encryption, the password fields are disabled then.
      *
-     * @return {owner password, user password}, empty strings for no encryption. Null if saving shall be cancelled.
+     * @return {owner password, user password}, empty strings for no encryption.
      */
     protected String[] passwordsForSave() {
-        if (pdfA3.isSelected())
+        if (pdfaMode())
             return new String[]{"", ""};
-        String ownerPwd = ownerPasswordField.getText().trim();
-        String userPwd = userPasswordField.getText().trim();
-        PDDocument document = documentProxy == null ? null : documentProxy.getDocument();
-        if ((!ownerPwd.isEmpty() || !userPwd.isEmpty()) && document != null && EInvoice.hasInvoice(document)) {
-            toaster.toast(ToastType.WARNING, 15000,
-                    "<html><font size='+1'><b>Encrypted e-invoice</b></font><br>The document contains an e-invoice, "
-                            + "but is saved with encryption.<br>It is no valid e-invoice then. "
-                            + "Check <i>PDF/A-3</i> to save it without.</html>");
-        }
-        return new String[]{ownerPwd, userPwd};
+        return new String[]{ownerPasswordField.getText().trim(), userPasswordField.getText().trim()};
     }
 
     /**
@@ -1713,6 +1519,26 @@ public class UI extends JSplitPane {
     }
 
     /**
+     * Asks to save if the option is set and the document has unsaved changes.
+     *
+     * @return True if the program may exit.
+     */
+    protected boolean confirmExit() {
+        if (documentProxy == null || !documentProxy.isModified()
+                || !Preferences.getInstance().getBoolean(Preferences.USER_PREF_CONFIRM_EXIT, true))
+            return true;
+        Object[] options = {"Write…", "Don't Write", "Cancel"};
+        int choice = JOptionPane.showOptionDialog(this, "The document has changes that are not written to a file.", "Exit",
+                JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE, null, options, options[0]);
+        if (choice == 0) {
+            doSave();
+            // Still modified if the file dialog was cancelled or writing failed.
+            return !documentProxy.isModified();
+        }
+        return choice == 1;
+    }
+
+    /**
      * Requests a file name and saves the document.
      */
     protected void doSave() {
@@ -1744,6 +1570,7 @@ public class UI extends JSplitPane {
                     String userPwd = passwords[1];
 
                     saveDocument(documentProxy.getCopy(), selectedFilePath, ownerPwd, userPwd);
+                    documentProxy.clearModified();
 
                     updatePreferences();
 
@@ -1756,7 +1583,7 @@ public class UI extends JSplitPane {
                         try {
                             final URI finalFile = selectedFilePath.toUri();
                             JButton open = new JButton("Open External");
-                            open.setToolTipText("<html>Tries to open the saved file with the<br>system's default application.</html>");
+                            open.setToolTipText("<html>Tries to open the written file with the<br>system's default application.</html>");
                             open.addActionListener(e -> {
                                 try {
                                     Desktop.getDesktop().browse(finalFile);
@@ -1784,7 +1611,7 @@ public class UI extends JSplitPane {
 
                     // toaster.toast("<html>Stored as<br><font size='+1'><i>%s</i></font></html>", selectedFilePath.getFileName());
                     JOptionPane.showOptionDialog(this,
-                            "<html><font size='+1'>The PDF was saved in<br><br><b>" + selectedFilePath + "</b><br><br></font></html>", "Stored",
+                            "<html><font size='+1'>The PDF was written to<br><br><b>" + selectedFilePath + "</b><br><br></font></html>", "Stored",
                             JOptionPane.DEFAULT_OPTION,
                             JOptionPane.INFORMATION_MESSAGE, null, options.toArray(), null);
 
@@ -2036,8 +1863,9 @@ public class UI extends JSplitPane {
 
         if (selectedFile != null) {
             documentProxy = new DocumentProxy(renderQueue);
-            pdfaFromDocument = true;
+            initialLoad = true;
             hadInvoice = false;
+            documentProxy.invoiceStandardCheck = this::checkInvoiceStandard;
             documentProxy.pdfaFixListener = changes -> runOnEdt(() -> notifyPdfaFixes(changes));
             documentProxy.riskListener = (fileName, risks) -> runOnEdt(() -> {
                 StringBuilder list = new StringBuilder();
@@ -2046,12 +1874,17 @@ public class UI extends JSplitPane {
                         "<html><font size='+1'><b>%s</b></font><br>%s</html>", fileName, list);
             });
             documentProxy.appendCheck = doc -> {
-                if (!pdfA3.isSelected() || PdfStandard.pdfaPart(doc) > 0)
+                if (!pdfaMode || PdfStandard.pdfaPart(doc) > 0)
                     return null;
                 toaster.toast(ToastType.ERROR, 10000,
                         "<html><font size='+1'><b>Not appended</b></font><br>The document is no PDF/A document.<br>"
-                                + "Uncheck <i>PDF/A-3</i> to append it anyway.</html>");
+                                + "Change the standard of the main document to <i>No PDF/A</i> to append it anyway.</html>");
                 return "Not appended: the document is no PDF/A document.";
+            };
+            final java.util.function.Function<PDDocument, String> pdfaCheck = documentProxy.appendCheck;
+            documentProxy.appendCheck = doc -> {
+                String refused = pdfaCheck.apply(doc);
+                return refused != null ? refused : EInvoice.hasInvoice(doc) ? checkInvoiceStandard() : null;
             };
             documentProxy.addDocumentConsumer(new DocumentProxy.DocumentConsumer() {
 
@@ -2064,19 +1897,15 @@ public class UI extends JSplitPane {
                     rotateAllClockwiseButton.setEnabled(true);
                     saveButton.setEnabled(true);
                     browseAppendButton.setEnabled(true);
-                    final boolean hasInvoice = EInvoice.hasInvoice(document);
-                    final int pdfaPart = PdfStandard.pdfaPart(document);
+                    standardButton.setEnabled(true);
                     // May be called from background tasks (e.g. attaching an invoice).
+                    final boolean hasInvoice = EInvoice.hasInvoice(document);
                     runOnEdt(() -> {
-                        if (pdfaFromDocument) {
-                            pdfaFromDocument = false;
-                            pdfA3.setSelected(pdfaPart == 3 || hasInvoice);
-                        } else if (hasInvoice && !hadInvoice) {
-                            // An invoice was added (attached or by appending a document): e-invoices need PDF/A-3.
-                            pdfA3.setSelected(true);
-                        }
+                        // Only an added invoice is repaired automatically, not a loaded document.
+                        final boolean invoiceAdded = hasInvoice && !hadInvoice && !initialLoad;
+                        initialLoad = false;
                         hadInvoice = hasInvoice;
-                        updatePdfAState();
+                        updatePdfAState(invoiceAdded);
                     });
 
                     initDocumentInformation();
@@ -2109,6 +1938,8 @@ public class UI extends JSplitPane {
         } else {
             initDocumentInformation();
 
+            standardButton.setEnabled(false);
+            pdfaMode = false;
             renderAllToImageButton.setEnabled(false);
             rotateAllClockwiseButton.setEnabled(false);
             saveButton.setEnabled(false);
@@ -2177,11 +2008,50 @@ public class UI extends JSplitPane {
 
 
     /**
-     * Enables or disables everything that would violate PDF/A-3, see {@link #pdfA3}.
+     * @return True if the document declares PDF/A: everything that would violate it is disabled.
      */
-    protected void updatePdfAState() {
-        final boolean pdfa = pdfA3.isSelected();
-        final String notAllowed = "Not allowed for PDF/A-3 (see the option beside the page count).";
+    protected boolean pdfaMode() {
+        return pdfaMode;
+    }
+
+    /**
+     * Enables or disables everything that would violate PDF/A, depending on the PDF/A level the document declares.<br>
+     * A loaded document is not repaired. A document that declares PDF/A is validated, the user is asked to repair
+     * it if that finds problems, see {@link #reportPdfaViolations}. Conversions are done by the user, see
+     * {@link #doChangeStandard}.
+     *
+     * @param repair True to repair the document first. That is only done when an invoice was added.
+     */
+    protected void updatePdfAState(boolean repair) {
+        boolean hasDocument = documentProxy != null && documentProxy.getDocument() != null;
+        if (hasDocument && repair) {
+            try {
+                // Declares PDF/A-3 if the document declares nothing.
+                var changes = documentProxy.fixPdfa();
+                if (!changes.isEmpty())
+                    notifyPdfaFixes(changes);
+            } catch (FontEmbedException e) {
+                // The document is not changed.
+                Log.error("PDF/A: %s", e.getMessage());
+                toaster.toast(ToastType.ERROR, 20000,
+                        "<html><font size='+1'><b>PDF/A not possible</b></font><br>%s</html>", e.getMessage());
+            } catch (IOException e) {
+                Log.error("Failed to fix PDF/A issues: %s", e.getMessage());
+            }
+        }
+        if (hasDocument && PdfStandard.pdfaPart(documentProxy.getDocument()) > 0) {
+            if (PdfStandard.pdfaPart(documentProxy.getDocument()) == 1 && compression.isSelected()) {
+                compression.setSelected(false);
+                toaster.toast(ToastType.INFO, 10000, "<html><font size='+1'><b>Compression switched off</b></font><br>"
+                        + "PDF/A-1 forbids compressed object streams.</html>");
+            }
+            // The result of a switch is shown together with its changes, see doChangeStandard.
+            if (!switchingStandard)
+                reportPdfaViolations();
+        }
+        pdfaMode = hasDocument && PdfStandard.pdfaPart(documentProxy.getDocument()) > 0;
+        final boolean pdfa = pdfaMode;
+        final String notAllowed = "Not allowed for PDF/A (see the button beside the page count).";
 
         ownerPasswordField.setEnabled(!pdfa);
         userPasswordField.setEnabled(!pdfa);
@@ -2191,28 +2061,310 @@ public class UI extends JSplitPane {
         ownerPasswordField.setToolTipText(pdfa ? notAllowed : null);
         userPasswordField.setToolTipText(pdfa ? notAllowed : null);
 
-        boolean hasDocument = documentProxy != null && documentProxy.getDocument() != null;
-        if (pdfa && hasDocument) {
-            // PDF/A needs an RGB output intent for the images of "To Image" and redaction, and forbids some features.
-            try {
-                var changes = documentProxy.fixPdfa();
-                if (!changes.isEmpty())
-                    notifyPdfaFixes(changes);
-            } catch (FontEmbedException e) {
-                // PDF/A can't be kept: don't claim it. Unchecking calls this method again.
-                Log.error("PDF/A: %s", e.getMessage());
-                toaster.toast(ToastType.ERROR, 20000,
-                        "<html><font size='+1'><b>PDF/A-3 not possible</b></font><br>%s</html>", e.getMessage());
-                pdfA3.setSelected(false);
-                return;
-            } catch (IOException e) {
-                Log.error("Failed to fix PDF/A issues: %s", e.getMessage());
-            }
-        }
         splitDocument.setEnabled(hasDocument && !pdfa);
-        splitDocument.setToolTipText(pdfa ? "<html>Not allowed for PDF/A-3: the parts lose the PDF/A metadata.</html>" : null);
+        splitDocument.setToolTipText(pdfa ? "<html>Not allowed for PDF/A: the parts lose the PDF/A metadata.</html>" : null);
 
         updatePermissions();
+    }
+
+    /**
+     * Opens the dialog to change the PDF/A level of the document and converts it.
+     */
+    protected void doChangeStandard() {
+        final DocumentProxy proxy = documentProxy;
+        if (proxy == null || proxy.getDocument() == null)
+            return;
+        final byte[] bytes;
+        try {
+            bytes = proxy.getBytes();
+        } catch (IOException e) {
+            Log.exception(e);
+            toaster.toast(ToastType.ERROR, 10000, "<html>Failed to read the document: %s</html>", e.getMessage());
+            return;
+        }
+        StandardDialog.Choice choice = StandardDialog.showDialog(this, bytes, PdfStandard.profile(proxy.getDocument()));
+        if (choice == null)
+            return;
+        reportedResult = ValidationResult.conform();
+        // The document is announced as changed: that must not start a second check.
+        switchingStandard = true;
+        runInBusy(() -> {
+            try {
+                var changes = proxy.convertToStandard(choice.profile());
+                // Wait for veraPDF, the result is shown together with the changes.
+                ValidationResult verification = ValidationResult.notDeclared();
+                if (choice.profile() != null && choice.profile().verifiable()) {
+                    try {
+                        verification = proxy.validatePdfa();
+                    } catch (Exception e) {
+                        Log.error("PDF/A validation failed: %s", e.getMessage());
+                        verification = ValidationResult.failed(e.getMessage());
+                    }
+                }
+                final ValidationResult result = verification;
+                runOnEdt(() -> {
+                    reportedProxy = proxy;
+                    reportedResult = result;
+                    showSwitchResult(choice.profile(), changes, result);
+                });
+            } catch (Exception e) {
+                Log.error("PDF standard: %s", e.getMessage());
+                runOnEdt(() -> toaster.toast(ToastType.ERROR, 20000,
+                        "<html><font size='+1'><b>Not possible</b></font><br>%s</html>", e.getMessage()));
+            } finally {
+                // After the update the announcement caused.
+                runOnEdt(() -> switchingStandard = false);
+            }
+        });
+    }
+
+    /**
+     * Shows what switching the standard changed and the result of the veraPDF check.
+     */
+    private void showSwitchResult(PdfStandardProfile target, java.util.Map<String, Integer> changes,
+                                  ValidationResult verification) {
+        if (GraphicsEnvironment.isHeadless())
+            return;
+        // Copy: the fixer of veraPDF adds its changes while the dialog is open.
+        final java.util.Map<String, Integer> shown = new java.util.LinkedHashMap<>(changes);
+        final JLabel changesLabel = new JLabel(switchChangesHtml(target, shown));
+        JPanel content = new JPanel(new BorderLayout(0, 10));
+        content.add(changesLabel, BorderLayout.NORTH);
+        if (target != null && target.verifiable()) {
+            VerificationResultPanel result = new VerificationResultPanel();
+            result.setResult(verification);
+            content.add(result, BorderLayout.CENTER);
+            content.add(createVeraPdfFixerRow(result, actions -> {
+                actions.forEach(a -> shown.merge(a, 1, Integer::sum));
+                changesLabel.setText(switchChangesHtml(target, shown));
+            }), BorderLayout.SOUTH);
+        } else if (target != null) {
+            content.add(new JLabel("<html><i>" + escapeHtml(target.notVerifiableReason()) + "</i></html>"),
+                    BorderLayout.CENTER);
+        }
+        JOptionPane.showMessageDialog(this, content, "PDF Standard",
+                verification.isConform() || target == null || !target.verifiable() ? JOptionPane.INFORMATION_MESSAGE
+                        : JOptionPane.WARNING_MESSAGE);
+    }
+
+    /**
+     * The text above the verification result of the switch: the headline and the changes.
+     */
+    private static String switchChangesHtml(PdfStandardProfile target, java.util.Map<String, Integer> changes) {
+        StringBuilder html = new StringBuilder("<html><b>")
+                .append(target == null ? "PDF/A declaration removed" : "Document switched to " + target).append("</b><br><br>");
+        if (changes.isEmpty()) {
+            html.append("No changes.");
+        } else {
+            html.append("<b>Changes:</b><br>");
+            changes.forEach((what, times) -> html.append("&bull; ").append(escapeHtml(what))
+                    .append(times > 1 ? " (" + times + "x)" : "").append("<br>"));
+        }
+        return html.append("</html>").toString();
+    }
+
+    /**
+     * Creates the row with the button that runs the fixer of veraPDF and verifies again. The result panel shows the
+     * new verification.
+     *
+     * @param onActions Called with the lines for the list of changes: what the fixer did, also if it could not
+     *                  repair the document or failed.
+     */
+    private JPanel createVeraPdfFixerRow(VerificationResultPanel result,
+                                         java.util.function.Consumer<java.util.List<String>> onActions) {
+        final DocumentProxy proxy = documentProxy;
+        JButton run = new JButton("Run veraPDF Fixer");
+        run.setToolTipText("Runs the metadata fixer of veraPDF on the document, then verifies it again.");
+        run.addActionListener(e -> {
+            run.setEnabled(false);
+            run.setText("Running...");
+            new SwingWorker<Object[], Void>() {
+                @Override
+                protected Object[] doInBackground() throws Exception {
+                    var fix = proxy.fixWithVeraPdf();
+                    ValidationResult verification;
+                    try {
+                        verification = proxy.validatePdfa();
+                    } catch (Exception ex) {
+                        verification = ValidationResult.failed(ex.getMessage());
+                    }
+                    return new Object[]{fix, verification};
+                }
+
+                @Override
+                protected void done() {
+                    java.util.List<String> actions = new java.util.ArrayList<>();
+                    try {
+                        var fix = (com.bw.jPdfTool.PdfaValidator.MetadataFix) get()[0];
+                        ValidationResult verification = (ValidationResult) get()[1];
+                        result.setResult(verification);
+                        reportedProxy = proxy;
+                        reportedResult = verification;
+                        if (fix.applied()) {
+                            if (fix.fixes().isEmpty())
+                                actions.add("veraPDF: metadata fixed");
+                            fix.fixes().forEach(f -> actions.add("veraPDF: " + f));
+                        } else {
+                            // A failed attempt is listed like the others.
+                            actions.add("veraPDF: " + fix.status() + ", not applied"
+                                    + (fix.status().contains("ID") ? " (it would only remove the PDF/A identification)" : ""));
+                            fix.fixes().forEach(f -> actions.add("veraPDF (not applied): " + f));
+                        }
+                    } catch (Exception ex) {
+                        Log.error("veraPDF fixer failed: %s", ex.getMessage());
+                        actions.add("veraPDF: failed: " + ex.getMessage());
+                    }
+                    onActions.accept(actions);
+                    run.setText("Run veraPDF Fixer");
+                    run.setEnabled(true);
+                    // The dialog may need more room for the new result and the list.
+                    Window window = SwingUtilities.getWindowAncestor(run);
+                    if (window != null)
+                        window.pack();
+                }
+            }.execute();
+        });
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        row.add(run);
+        return row;
+    }
+
+    private static String escapeHtml(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;");
+    }
+
+    /**
+     * Result of the PDF/A check: the violations and what a repair would change.
+     */
+    private record PdfaCheck(ValidationResult result, java.util.Map<String, Integer> repairs) {
+    }
+
+    /**
+     * Checks the document with veraPDF in the background. If it finds violations and a repair would change
+     * something, the user is asked to repair the document. Otherwise the violations are shown.
+     */
+    private void reportPdfaViolations() {
+        // The document is announced as loaded many times (e.g. after each rendered page): check one at a time.
+        if (!pdfaChecking.compareAndSet(false, true))
+            return;
+        final DocumentProxy proxy = documentProxy;
+        new SwingWorker<PdfaCheck, Void>() {
+            @Override
+            protected PdfaCheck doInBackground() throws Exception {
+                ValidationResult result = proxy.validatePdfa();
+                java.util.Map<String, Integer> repairs = java.util.Map.of();
+                if (result.getState() == ValidationResult.State.NOT_CONFORM) {
+                    try {
+                        repairs = proxy.previewPdfaRepair();
+                    } catch (Exception e) {
+                        // E.g. a font that can't be embedded: the violations are shown without repair.
+                        Log.error("PDF/A: no repair possible: %s", e.getMessage());
+                    }
+                }
+                return new PdfaCheck(result, repairs);
+            }
+
+            @Override
+            protected void done() {
+                pdfaChecking.set(false);
+                try {
+                    PdfaCheck check = get();
+                    if (check.result().getState() != ValidationResult.State.NOT_CONFORM) {
+                        Log.info("PDF/A: veraPDF: %s", check.result().getState());
+                        reportedResult = ValidationResult.conform();
+                        return;
+                    }
+                    if (proxy == reportedProxy && check.result().equals(reportedResult))
+                        // Already shown (or declined).
+                        return;
+                    reportedProxy = proxy;
+                    reportedResult = check.result();
+                    check.result().toLines().forEach(v -> Log.error("PDF/A: %s", v));
+                    if (proxy != documentProxy || GraphicsEnvironment.isHeadless())
+                        // The violations are logged.
+                        return;
+                    VerificationResultPanel result = new VerificationResultPanel();
+                    result.setResult(check.result());
+                    if (check.repairs().isEmpty()) {
+                        JOptionPane.showMessageDialog(UI.this, result, "Not PDF/A conform", JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+                    StringBuilder changes = new StringBuilder("<html><b>A repair would change:</b><br>");
+                    check.repairs().forEach((what, times) ->
+                            changes.append("&bull; ").append(escapeHtml(what)).append(" (").append(times).append("x)<br>"));
+                    changes.append("<br>Repair the document?</html>");
+                    JPanel message = new JPanel(new BorderLayout(0, 8));
+                    message.add(new JLabel("The document is not PDF/A conform."), BorderLayout.NORTH);
+                    message.add(result, BorderLayout.CENTER);
+                    message.add(new JLabel(changes.toString()), BorderLayout.SOUTH);
+                    int answer = JOptionPane.showConfirmDialog(UI.this, message, "PDF/A", JOptionPane.YES_NO_OPTION,
+                            JOptionPane.QUESTION_MESSAGE);
+                    if (answer == JOptionPane.YES_OPTION)
+                        repairPdfa(proxy);
+                } catch (Exception e) {
+                    Log.error("PDF/A validation failed: %s", e.getMessage());
+                }
+            }
+        }.execute();
+    }
+
+    /**
+     * Repairs what PDF/A forbids, then checks the document again.
+     */
+    private void repairPdfa(DocumentProxy proxy) {
+        runInBusy(() -> {
+            try {
+                var changes = proxy.fixPdfa();
+                runOnEdt(() -> {
+                    if (!changes.isEmpty())
+                        notifyPdfaFixes(changes);
+                    // Show what remains.
+                    reportedResult = ValidationResult.conform();
+                    reportPdfaViolations();
+                });
+            } catch (Exception e) {
+                Log.error("PDF/A: %s", e.getMessage());
+                runOnEdt(() -> toaster.toast(ToastType.ERROR, 20000,
+                        "<html><font size='+1'><b>Not possible</b></font><br>%s</html>", e.getMessage()));
+            }
+        });
+    }
+
+    /**
+     * Checks before an invoice is added that the document is PDF/A-3, as e-invoices need. Otherwise the user is asked
+     * to switch the document. May be called from any thread.
+     *
+     * @return Null to continue, otherwise the reason to abort the operation.
+     */
+    private String checkInvoiceStandard() {
+        final DocumentProxy proxy = documentProxy;
+        PDDocument document = proxy == null ? null : proxy.getDocument();
+        if (document == null || PdfStandard.pdfaPart(document) == 3)
+            return null;
+        if (document.getVersion() > 1.7f)
+            return "Aborted: e-invoices need PDF/A-3, which is based on PDF 1.7. A PDF 2.0 document can't be conform.";
+        final String label = PdfStandard.pdfaLabel(document);
+        final String message = "<html>E-invoices need PDF/A-3, but the document is "
+                + (label == null ? "no PDF/A document" : label) + ".<br>Switch the document to PDF/A-3?</html>";
+        final int[] answer = {JOptionPane.NO_OPTION};
+        try {
+            if (SwingUtilities.isEventDispatchThread())
+                answer[0] = JOptionPane.showConfirmDialog(this, message, "Invoice", JOptionPane.YES_NO_OPTION);
+            else
+                SwingUtilities.invokeAndWait(() -> answer[0] = JOptionPane.showConfirmDialog(this, message, "Invoice",
+                        JOptionPane.YES_NO_OPTION));
+        } catch (Exception e) {
+            return "Aborted: " + e.getMessage();
+        }
+        if (answer[0] != JOptionPane.YES_OPTION)
+            return "Aborted: the document is not PDF/A-3.";
+        try {
+            // Without telling the listeners: the invoice operation continues with the document.
+            proxy.convertToStandardQuietly(PdfStandardProfile.PDFA_3B);
+        } catch (IOException e) {
+            return "Aborted: " + e.getMessage();
+        }
+        return null;
     }
 
     /**
@@ -2221,13 +2373,14 @@ public class UI extends JSplitPane {
     private void notifyPdfaFixes(java.util.Map<String, Integer> changes) {
         StringBuilder list = new StringBuilder();
         changes.forEach((what, times) -> list.append("&bull; ").append(what).append(" (").append(times).append("x)<br>"));
-        final String message = "<html><font size='+1'><b>Document changed for PDF/A-3</b></font><br>"
+        final String message = "<html><font size='+1'><b>Document changed for PDF/A</b></font><br>"
                 + list
                 + "Reload the file to get the original.</html>";
-        toaster.toast(ToastType.INFO, 10000, message);
-        if (!GraphicsEnvironment.isHeadless())
+        if (GraphicsEnvironment.isHeadless())
+            toaster.toast(ToastType.INFO, 10000, message);
+        else
             // Later: this may be called while a document is loading.
-            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, message, "PDF/A-3",
+            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, message, "PDF/A",
                     JOptionPane.INFORMATION_MESSAGE));
     }
 
@@ -2261,16 +2414,16 @@ public class UI extends JSplitPane {
      */
     protected boolean imagesAllowed() {
         PDDocument document = documentProxy == null ? null : documentProxy.getDocument();
-        if (!pdfA3.isSelected() || document == null || PdfStandard.hasRgbOutputIntent(document))
+        if (!pdfaMode || document == null || PdfStandard.hasRgbOutputIntent(document))
             return true;
         toaster.toast(ToastType.ERROR, 10000,
-                "<html><font size='+1'><b>Not possible with PDF/A-3</b></font><br>The images use RGB colors, "
-                        + "but the document has a non-RGB output intent (e.g. CMYK).<br>Uncheck <i>PDF/A-3</i> to do it anyway.</html>");
+                "<html><font size='+1'><b>Not possible with PDF/A</b></font><br>The images use RGB colors, "
+                        + "but the document has a non-RGB output intent (e.g. CMYK).<br>Change the standard to <i>No PDF/A</i> to do it anyway.</html>");
         return false;
     }
 
     protected void updatePermissions() {
-        boolean rightsPossible = !pdfA3.isSelected() && !ownerPasswordField.getText().trim().isEmpty();
+        boolean rightsPossible = !pdfaMode && !ownerPasswordField.getText().trim().isEmpty();
         allowPrinting.setEnabled(rightsPossible);
         allowExtraction.setEnabled(rightsPossible);
         allowModification.setEnabled(rightsPossible);
@@ -2332,7 +2485,7 @@ public class UI extends JSplitPane {
             Log.debug("Last PDF Directory '%s'", lastDir);
             savePdfChooser.setCurrentDirectory(new File(lastDir));
         }
-        savePdfChooser.setDialogTitle("Select PDF to Save…");
+        savePdfChooser.setDialogTitle("Select PDF to Write…");
         savePdfChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         savePdfChooser.setMultiSelectionEnabled(false);
         savePdfChooser.setFileFilter(pdfFilter);
@@ -2400,7 +2553,15 @@ public class UI extends JSplitPane {
                 UI.mainWindow.setIconImage(icon);
             } catch (Exception ignored) {
             }
-            UI.mainWindow.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            // The window closes in confirmExit(), which may ask to save first.
+            UI.mainWindow.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+            UI.mainWindow.addWindowListener(new java.awt.event.WindowAdapter() {
+                @Override
+                public void windowClosing(java.awt.event.WindowEvent e) {
+                    if (ui.confirmExit())
+                        System.exit(0);
+                }
+            });
 
             UI.mainWindow.setJMenuBar(ui.getMenu());
             UI.mainWindow.setLocationByPlatform(true);

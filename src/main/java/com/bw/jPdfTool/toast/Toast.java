@@ -115,10 +115,7 @@ public class Toast extends JPanel {
         this.type = type;
         setToastBorder();
 
-        JButton close = new JButton(UI.getIcon("close"));
-        close.setBorderPainted(false);
-        close.setContentAreaFilled(false);
-        close.setBorder(null);
+        JButton close = new ToastButton(UI.getIcon("close"));
 
         if (onClose != null) {
             close.addActionListener(e -> {
@@ -164,13 +161,18 @@ public class Toast extends JPanel {
         gc.weighty = 0;
         add(close, gc);
 
-        JButton openDialog = new JButton(UI.getIcon("openToast"));
-        openDialog.setBorderPainted(false);
-        openDialog.setContentAreaFilled(false);
-        openDialog.setBorder(null);
+        JButton openDialog = new ToastButton(UI.getIcon("openToast"));
+        JButton copy = new ToastButton(UI.getIcon("copy"));
+        copy.setToolTipText("Copy the message to the clipboard");
+        copy.addActionListener(e -> copyToClipboard());
+
+        JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 0));
+        actions.setOpaque(false);
+        actions.add(copy);
+        actions.add(openDialog);
         gc.gridy = 1;
         gc.anchor = GridBagConstraints.SOUTHEAST;
-        add(openDialog, gc);
+        add(actions, gc);
 
         openDialog.addActionListener(e -> {
             int optype = switch (type) {
@@ -180,7 +182,8 @@ public class Toast extends JPanel {
                 case SUCCESS -> JOptionPane.INFORMATION_MESSAGE;
             };
 
-            JOptionPane.showMessageDialog(this, new JLabel(textArea.getText()),
+            JOptionPane.showMessageDialog(this,
+                    new JLabel(textArea.getText()),
                     null, optype);
         });
 
@@ -192,6 +195,56 @@ public class Toast extends JPanel {
 
         enableEvents(AWTEvent.MOUSE_EVENT_MASK);
 
+    }
+
+    /**
+     * A flat icon button with a clearly visible hover and pressed state: the background is the text color with
+     * some alpha (so it is visible in light and dark themes), the pressed icon is moved a pixel.
+     */
+    private static final class ToastButton extends JButton {
+        ToastButton(Icon icon) {
+            super(icon);
+            setFocusable(false);
+            setBorderPainted(false);
+            setContentAreaFilled(false);
+            setRolloverEnabled(true);
+            setMargin(new Insets(3, 3, 3, 3));
+        }
+
+        @Override
+        protected void paintComponent(java.awt.Graphics g) {
+            boolean pressed = getModel().isPressed() && getModel().isArmed();
+            if (pressed || getModel().isRollover()) {
+                java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+                g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                Color c = getForeground();
+                g2.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), pressed ? 90 : 35));
+                g2.fillRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 8, 8);
+                if (pressed) {
+                    g2.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), 160));
+                    g2.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 8, 8);
+                }
+                g2.dispose();
+            }
+            if (pressed)
+                g.translate(1, 1);
+            super.paintComponent(g);
+            if (pressed)
+                g.translate(-1, -1);
+        }
+    }
+
+    /**
+     * Copies the text of the message (without the HTML markup) to the clipboard.
+     */
+    private void copyToClipboard() {
+        try {
+            String text = textArea.getDocument().getText(0, textArea.getDocument().getLength()).strip();
+            Toolkit.getDefaultToolkit().getSystemClipboard()
+                    .setContents(new java.awt.datatransfer.StringSelection(text), null);
+        } catch (Exception e) {
+            Log.error("Can't copy to clipboard: %s", e.getMessage());
+        }
     }
 
     private Timer closeTimer;

@@ -61,7 +61,7 @@ public final class AboutDialog {
 
         gc.gridy++;
         gc.insets = new Insets(8, 0, 0, 0);
-        content.add(new JLabel("<html><body style=\"width:300px\">" + AboutInfo.DESCRIPTION + "</body></html>"), gc);
+        content.add(new JLabel("<html><body style=\"width:525px\">" + AboutInfo.DESCRIPTION + "</body></html>"), gc);
 
         gc.gridy++;
         gc.insets = new Insets(14, 0, 0, 0);
@@ -85,7 +85,7 @@ public final class AboutDialog {
                 browse(e.getURL().toString());
         });
         JScrollPane scroll = new JScrollPane(details);
-        scroll.setPreferredSize(new Dimension(520, 240));
+        scroll.setPreferredSize(new Dimension(910, 240));
         content.add(scroll, gc);
 
         JButton copy = new JButton("Copy Info");
@@ -182,6 +182,6 @@ public final class AboutDialog {
         area.setLineWrap(true);
         area.setWrapStyleWord(true);
         area.setCaretPosition(0);
-        JOptionPane.showMessageDialog(owner, new JScrollPane(area), "License", JOptionPane.PLAIN_MESSAGE);
+        JOptionPane.showMessageDialog(owner, new JScrollPane(area), AboutInfo.LICENSE_NAME, JOptionPane.PLAIN_MESSAGE);
     }
 }

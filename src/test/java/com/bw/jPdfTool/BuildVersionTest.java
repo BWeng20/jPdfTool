@@ -21,6 +21,7 @@ class BuildVersionTest {
     @Test
     void librariesAreListed() {
         Assertions.assertTrue(BuildVersion.LIBRARIES.length > 0);
+        Assertions.assertEquals(BuildVersion.LIBRARIES.length, BuildVersion.LICENSES.length);
         for (String l : BuildVersion.LIBRARIES)
             Assertions.assertEquals(3, l.split(":").length, l);
     }

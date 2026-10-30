@@ -64,7 +64,11 @@ public final class Redactor {
     public static List<Region> findText(PDDocument document, Pattern pattern) throws IOException {
         List<Region> result = new ArrayList<>();
         PageTextCollector collector = new PageTextCollector(pattern, result);
-        collector.getText(document);
+        try {
+            collector.getText(document);
+        } catch (SearchTimeoutException e) {
+            throw new IOException(e.getMessage(), e);
+        }
         return result;
     }
 
@@ -268,6 +272,56 @@ public final class Redactor {
     /**
      * Collects the text of each page together with the position of each character and searches for the pattern.
      */
+    /**
+     * Maximum time to search one page. A pattern with catastrophic backtracking would block the caller otherwise.
+     */
+    private static final long SEARCH_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+
+    /**
+     * Thrown by {@link DeadlineCharSequence} if a search takes too long.
+     */
+    private static final class SearchTimeoutException extends RuntimeException {
+        SearchTimeoutException() {
+            super("The search pattern takes too long, use a simpler one", null, false, false);
+        }
+    }
+
+    /**
+     * A text that aborts the regular expression engine after a deadline: the engine reads the text with charAt.
+     */
+    private static final class DeadlineCharSequence implements CharSequence {
+        private final CharSequence text;
+        private final long deadline;
+        private int reads;
+
+        DeadlineCharSequence(CharSequence text, long deadline) {
+            this.text = text;
+            this.deadline = deadline;
+        }
+
+        @Override
+        public int length() {
+            return text.length();
+        }
+
+        @Override
+        public char charAt(int index) {
+            if ((++reads & 0x3FF) == 0 && System.nanoTime() - deadline > 0)
+                throw new SearchTimeoutException();
+            return text.charAt(index);
+        }
+
+        @Override
+        public CharSequence subSequence(int start, int end) {
+            return new DeadlineCharSequence(text.subSequence(start, end), deadline);
+        }
+
+        @Override
+        public String toString() {
+            return text.toString();
+        }
+    }
+
     private static class PageTextCollector extends PDFTextStripper {
 
         private final Pattern pattern;
@@ -319,7 +373,7 @@ public final class Redactor {
         @Override
         protected void endPage(PDPage page) throws IOException {
             super.endPage(page);
-            Matcher m = pattern.matcher(text);
+            Matcher m = pattern.matcher(new DeadlineCharSequence(text, System.nanoTime() + SEARCH_TIMEOUT_NANOS));
             while (m.find()) {
                 if (m.end() > m.start())
                     addRegions(m.start(), m.end());

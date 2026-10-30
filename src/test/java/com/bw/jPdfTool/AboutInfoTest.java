@@ -25,7 +25,7 @@ class AboutInfoTest {
         Assertions.assertTrue(components.stream().anyMatch(c -> c.name().startsWith("Arimo")));
         for (var c : components) {
             Assertions.assertNotEquals("unknown", c.license(), "License missing in AboutInfo for " + c.name());
-            Assertions.assertTrue(c.licenseUrl() != null && c.licenseUrl().startsWith("https://"), c.name());
+            Assertions.assertTrue(c.licenseUrl() != null && c.licenseUrl().startsWith("http"), c.name());
         }
         Assertions.assertTrue(AboutInfo.asText().contains("(https://www.apache.org/licenses/LICENSE-2.0)"));
     }

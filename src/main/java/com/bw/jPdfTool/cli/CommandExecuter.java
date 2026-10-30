@@ -154,6 +154,15 @@ public class CommandExecuter {
     }
 
     /**
+     * Validates a stored PDF with veraPDF, see {@link com.bw.jPdfTool.PdfaValidator}.
+     *
+     * @return The violated rules, empty if the PDF is conform.
+     */
+    public com.bw.jPdfTool.ValidationResult validatePdfa(Path pdfFile) throws Exception {
+        return com.bw.jPdfTool.PdfaValidator.validate(Files.readAllBytes(pdfFile));
+    }
+
+    /**
      * Split the effective document. The effective document itself is not changed.
      */
     public void split(int pagePerDocument,

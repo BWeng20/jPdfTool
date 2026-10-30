@@ -19,8 +19,11 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.LinkedHashMap;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,6 +40,10 @@ final class PdfaFixer {
     private static final COSName OPI = COSName.getPDFName("OPI");
     private static final COSName ALTERNATES = COSName.getPDFName("Alternates");
     private static final COSName REF = COSName.getPDFName("Ref");
+    private static final COSName OC_PROPERTIES = COSName.getPDFName("OCProperties");
+    private static final COSName CONFIGS = COSName.getPDFName("Configs");
+    private static final COSName OCGS = COSName.getPDFName("OCGs");
+    private static final COSName ORDER = COSName.getPDFName("Order");
     private static final COSName TR2 = COSName.getPDFName("TR2");
     private static final COSName HTP = COSName.getPDFName("HTP");
     private static final COSName JAVASCRIPT = COSName.getPDFName("JavaScript");
@@ -44,7 +51,7 @@ final class PdfaFixer {
     private static final Set<String> FONT_TYPES = Set.of("Type0", "Type1", "MMType1", "TrueType");
     private static final int FLAG_HIDDEN = 2, FLAG_PRINT = 4, FLAG_NOVIEW = 32;
 
-    private final Set<COSBase> visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    private final Set<COSBase> visited = Collections.newSetFromMap(new IdentityHashMap<>());
     private final List<COSStream> contents = new ArrayList<>();
     private final List<COSDictionary> fonts = new ArrayList<>();
     /**
@@ -92,46 +99,106 @@ final class PdfaFixer {
         fixIntent(state, COSName.getPDFName("RI"));
     }
 
-    private void fixDictionary(COSDictionary d) {
-        COSName type = d.getCOSName(COSName.TYPE);
-        COSName subtype = d.getCOSName(COSName.SUBTYPE);
-        boolean stream = d instanceof COSStream;
-
-        if (!stream && d.containsKey(COSName.BASE_FONT) && subtype != null
-                && FONT_TYPES.contains(subtype.getName()))
-            fonts.add(d);
-
-        if (stream) {
-            remove(d, COSName.F);
-            remove(d, COSName.F_FILTER);
-            remove(d, COSName.F_DECODE_PARMS);
+    private static void collectOrdered(COSArray order, Set<COSBase> found) {
+        for (int i = 0; i < order.size(); ++i) {
+            COSBase item = order.getObject(i);
+            if (item instanceof COSArray nested)
+                collectOrdered(nested, found);
+            else if (item instanceof COSDictionary)
+                found.add(item);
         }
-        if (COSName.IMAGE.equals(subtype)) {
-            if (d.getBoolean(COSName.INTERPOLATE, false)) {
-                d.setBoolean(COSName.INTERPOLATE, false);
-                changed("Disabled image interpolation", 1);
+    }
+
+    /**
+     * PDF/A: every optional content configuration needs a /Name, and an /Order has to list all OCGs.
+     */
+    private void fixOptionalContent(COSDictionary ocProperties) {
+        List<COSDictionary> configs = new ArrayList<>();
+        if (ocProperties.getDictionaryObject(COSName.D) instanceof COSDictionary d)
+            configs.add(d);
+        if (ocProperties.getDictionaryObject(CONFIGS) instanceof COSArray array)
+            for (int i = 0; i < array.size(); ++i)
+                if (array.getObject(i) instanceof COSDictionary c)
+                    configs.add(c);
+        COSArray ocgs = ocProperties.getDictionaryObject(OCGS) instanceof COSArray a ? a : new COSArray();
+        for (COSDictionary config : configs) {
+            if (config.getString(COSName.NAME) == null) {
+                config.setString(COSName.NAME, config == ocProperties.getDictionaryObject(COSName.D) ? "Default"
+                        : "Config " + configs.indexOf(config));
+                changed("Added missing name to optional content configuration", 1);
             }
-            remove(d, ALTERNATES);
-            remove(d, OPI);
-            fixIntent(d, COSName.INTENT);
-        } else if (COSName.FORM.equals(subtype)) {
-            remove(d, OPI);
-            remove(d, REF);
+            if (config.getDictionaryObject(ORDER) instanceof COSArray order) {
+                Set<COSBase> found = Collections.newSetFromMap(new IdentityHashMap<>());
+                collectOrdered(order, found);
+                int added = 0;
+                for (int i = 0; i < ocgs.size(); ++i)
+                    if (ocgs.getObject(i) instanceof COSDictionary ocg && found.add(ocg)) {
+                        order.add(ocgs.get(i));
+                        ++added;
+                    }
+                if (added > 0)
+                    changed("Added missing OCGs to optional content order", added);
+            }
         }
-        if (d.getDictionaryObject(COSName.EXT_G_STATE) instanceof COSDictionary states)
+    }
+
+    /**
+     * Streams: external file data is forbidden.
+     */
+    private void fixStream(COSDictionary stream) {
+        remove(stream, COSName.F);
+        remove(stream, COSName.F_FILTER);
+        remove(stream, COSName.F_DECODE_PARMS);
+    }
+
+    /**
+     * Image XObjects: no interpolation, alternates, OPI, unknown rendering intents.
+     */
+    private void fixImage(COSDictionary image) {
+        if (image.getBoolean(COSName.INTERPOLATE, false)) {
+            image.setBoolean(COSName.INTERPOLATE, false);
+            changed("Disabled image interpolation", 1);
+        }
+        remove(image, ALTERNATES);
+        remove(image, OPI);
+        fixIntent(image, COSName.INTENT);
+    }
+
+    /**
+     * Form XObjects: no OPI and no reference XObjects.
+     */
+    private void fixForm(COSDictionary form) {
+        remove(form, OPI);
+        remove(form, REF);
+    }
+
+    /**
+     * Resources: no transfer functions, halftones and unknown rendering intents in the graphics states.
+     */
+    private void fixGraphicsStates(COSDictionary resources) {
+        if (resources.getDictionaryObject(COSName.EXT_G_STATE) instanceof COSDictionary states)
             for (COSName name : states.keySet())
                 if (states.getDictionaryObject(name) instanceof COSDictionary state)
                     fixGraphicsState(state);
-        if (COSName.CATALOG.equals(type)) {
-            remove(d, COSName.AA);
-            fixAction(d, OPEN_ACTION);
-            if (d.getDictionaryObject(COSName.NAMES) instanceof COSDictionary names)
-                remove(names, JAVASCRIPT);
-        }
-        if (COSName.WIDGET.equals(subtype) || d.containsKey(COSName.FT))
-            remove(d, COSName.AA);
-        fixAction(d, COSName.A);
-        if (COSName.PAGE.equals(type) && d.getDictionaryObject(COSName.ANNOTS) instanceof COSArray annots)
+    }
+
+    /**
+     * Catalog: no additional actions, no forbidden open action, no document level JavaScript, valid optional content.
+     */
+    private void fixCatalog(COSDictionary catalog) {
+        remove(catalog, COSName.AA);
+        fixAction(catalog, OPEN_ACTION);
+        if (catalog.getDictionaryObject(COSName.NAMES) instanceof COSDictionary names)
+            remove(names, JAVASCRIPT);
+        if (catalog.getDictionaryObject(OC_PROPERTIES) instanceof COSDictionary ocProperties)
+            fixOptionalContent(ocProperties);
+    }
+
+    /**
+     * Annotations of a page: printable and not hidden (popups are exempt).
+     */
+    private void fixAnnotationFlags(COSDictionary page) {
+        if (page.getDictionaryObject(COSName.ANNOTS) instanceof COSArray annots)
             for (int i = 0; i < annots.size(); ++i)
                 if (annots.getObject(i) instanceof COSDictionary annot
                         && !COSName.POPUP.equals(annot.getCOSName(COSName.SUBTYPE))) {
@@ -142,6 +209,31 @@ final class PdfaFixer {
                         changed("Fixed annotation flags (printable, visible)", 1);
                     }
                 }
+    }
+
+    private void fixDictionary(COSDictionary d) {
+        COSName type = d.getCOSName(COSName.TYPE);
+        COSName subtype = d.getCOSName(COSName.SUBTYPE);
+        boolean stream = d instanceof COSStream;
+
+        if (!stream && d.containsKey(COSName.BASE_FONT) && subtype != null
+                && FONT_TYPES.contains(subtype.getName()))
+            fonts.add(d);
+
+        if (stream)
+            fixStream(d);
+        if (COSName.IMAGE.equals(subtype))
+            fixImage(d);
+        else if (COSName.FORM.equals(subtype))
+            fixForm(d);
+        fixGraphicsStates(d);
+        if (COSName.CATALOG.equals(type))
+            fixCatalog(d);
+        if (COSName.WIDGET.equals(subtype) || d.containsKey(COSName.FT))
+            remove(d, COSName.AA);
+        fixAction(d, COSName.A);
+        if (COSName.PAGE.equals(type))
+            fixAnnotationFlags(d);
     }
 
     /**
@@ -195,7 +287,7 @@ final class PdfaFixer {
      * Fixes the inline images of the collected content streams.
      */
     void fixContentStreams() throws IOException {
-        for (COSStream s : new java.util.LinkedHashSet<>(contents)) {
+        for (COSStream s : new LinkedHashSet<>(contents)) {
             byte[] data;
             try (InputStream is = s.createInputStream()) {
                 data = is.readAllBytes();

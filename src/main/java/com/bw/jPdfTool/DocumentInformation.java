@@ -109,6 +109,15 @@ public final class DocumentInformation {
                 document.getDocumentCatalog().setMetadata(null);
             }
         }
+        if (PdfStandard.pdfaPart(document) == 4)
+            removeInfo(document);
+    }
+
+    /**
+     * PDF/A-4 doesn't allow a document information dictionary (the XMP metadata carries the values).
+     */
+    static void removeInfo(PDDocument document) {
+        document.getDocument().getTrailer().removeItem(org.apache.pdfbox.cos.COSName.INFO);
     }
 
     private static boolean isPdfA(PDMetadata metadata) {

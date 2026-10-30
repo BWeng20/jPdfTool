@@ -4,6 +4,9 @@ import com.bw.jPdfTool.invoice.EInvoiceTest;
 import com.bw.jPdfTool.invoice.EInvoice;
 
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -72,10 +75,77 @@ class PdfStandardTest {
     @Test
     void test_fixPdfaIssues_addsOutputIntentOnce() throws Exception {
         try (PDDocument doc = Loader.loadPDF(EInvoiceTest.plainPdf(1))) {
-            Assertions.assertEquals(java.util.List.of("Added sRGB output intent"),
+            Assertions.assertEquals(java.util.List.of("Added sRGB output intent", "Declared PDF/A-3b"),
                     new java.util.ArrayList<>(PdfStandard.fixPdfaIssues(doc).keySet()));
             Assertions.assertTrue(PdfStandard.hasRgbOutputIntent(doc));
+            Assertions.assertEquals(3, PdfStandard.pdfaPart(doc));
+            Assertions.assertTrue(PdfStandard.describe(doc).endsWith("PDF/A-3b"));
             Assertions.assertTrue(PdfStandard.fixPdfaIssues(doc).isEmpty(), "nothing left to fix");
+        }
+    }
+
+    @Test
+    void test_fixPdfaIssues_optionalContent() throws Exception {
+        try (PDDocument doc = Loader.loadPDF(EInvoiceTest.plainPdf(1))) {
+            COSName ocProperties = COSName.getPDFName("OCProperties"), order = COSName.getPDFName("Order");
+            COSDictionary ocg1 = new COSDictionary(), ocg2 = new COSDictionary();
+            ocg1.setItem(COSName.TYPE, COSName.getPDFName("OCG"));
+            ocg2.setItem(COSName.TYPE, COSName.getPDFName("OCG"));
+            COSArray ocgs = new COSArray();
+            ocgs.add(ocg1);
+            ocgs.add(ocg2);
+            // ocg1 is listed in a nested array, ocg2 is missing
+            COSArray nested = new COSArray();
+            nested.add(ocg1);
+            COSArray orderArray = new COSArray();
+            orderArray.add(nested);
+            COSDictionary config = new COSDictionary();
+            config.setItem(order, orderArray);
+            COSDictionary props = new COSDictionary();
+            props.setItem(COSName.getPDFName("OCGs"), ocgs);
+            props.setItem(COSName.D, config);
+            doc.getDocumentCatalog().getCOSObject().setItem(ocProperties, props);
+
+            var changes = PdfStandard.fixPdfaIssues(doc);
+            Assertions.assertEquals(1, changes.get("Added missing OCGs to optional content order"));
+            Assertions.assertEquals(1, changes.get("Added missing name to optional content configuration"));
+            Assertions.assertEquals("Default", config.getString(COSName.NAME));
+            Assertions.assertEquals(2, orderArray.size());
+            Assertions.assertSame(ocg2, orderArray.getObject(1));
+            Assertions.assertFalse(PdfStandard.fixPdfaIssues(doc).keySet().stream()
+                    .anyMatch(k -> k.contains("optional content")), "nothing left to fix");
+        }
+    }
+
+    @Test
+    void test_fixPdfaIssues_declaresPdfa3bAndKeepsInformation() throws Exception {
+        try (PDDocument doc = Loader.loadPDF(EInvoiceTest.plainPdf(1))) {
+            var info = new org.apache.pdfbox.pdmodel.PDDocumentInformation();
+            info.setProducer("My Producer");
+            info.setCreator("My Creator");
+            info.setTitle("My Title");
+            doc.setDocumentInformation(info);
+            // A page without resources must not break Mustang.
+            doc.getPage(0).getCOSObject().removeItem(org.apache.pdfbox.cos.COSName.RESOURCES);
+
+            Assertions.assertTrue(PdfStandard.fixPdfaIssues(doc).containsKey("Declared PDF/A-3b"));
+            Assertions.assertEquals("PDF/A-3b", PdfStandard.describe(doc).replaceAll("^.*(PDF/A-3b).*$", "$1"));
+            Assertions.assertEquals("My Producer", doc.getDocumentInformation().getProducer());
+            Assertions.assertEquals("My Creator", doc.getDocumentInformation().getCreator());
+            Assertions.assertEquals("My Title", doc.getDocumentInformation().getTitle());
+            Assertions.assertTrue(PdfStandard.fixPdfaIssues(doc).isEmpty(), "nothing left to fix");
+        }
+    }
+
+    @Test
+    void test_pdfaValidator_reportsViolationsOfRepairedDocument() throws Exception {
+        byte[] plain = EInvoiceTest.plainPdf(1);
+        Assertions.assertEquals(ValidationResult.State.NOT_DECLARED, PdfaValidator.validate(plain).getState());
+        try (PDDocument doc = Loader.loadPDF(plain)) {
+            PdfStandard.fixPdfaIssues(doc);
+            var out = new java.io.ByteArrayOutputStream();
+            doc.save(out, org.apache.pdfbox.pdfwriter.compress.CompressParameters.NO_COMPRESSION);
+            Assertions.assertTrue(PdfaValidator.validate(out.toByteArray()).isConform());
         }
     }
 

@@ -20,6 +20,7 @@ ext {
     mustangVersion = '2.26.0'
     // Keep in sync with the version Mustang uses (see 'gradlew dependencies'), otherwise Gradle silently upgrades.
     pdfboxVersion = '3.0.8'
+    verapdfVersion = '1.30.2'
 }
 
 java {
@@ -54,6 +55,12 @@ dependencies {
 
     implementation "org.mustangproject:library:${mustangVersion}"
     implementation "org.mustangproject:validator:${mustangVersion}"
+    // veraPDF is used directly (PdfaValidator), not only through the Mustang validator. Version used by Mustang,
+    // otherwise Gradle silently upgrades.
+    implementation "org.verapdf:core-jakarta:${verapdfVersion}"
+    implementation "org.verapdf:validation-model-jakarta:${verapdfVersion}"
+    implementation "org.verapdf:metadata-fixer-jakarta:${verapdfVersion}"
+    implementation "org.verapdf:feature-reporting-jakarta:${verapdfVersion}"
     implementation 'org.slf4j:slf4j-nop:2.0.20'
     // Seller presets (sellers.json). Version used by Mustang, otherwise Gradle silently upgrades.
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.22.4'
@@ -80,18 +87,58 @@ tasks.register('generateVersion') {
     inputs.property('buildDate', buildDate)
     inputs.files(runtime)
     outputs.dir(outputDir)
+    def licenseFileProvider = layout.buildDirectory.file('licenses/THIRD-PARTY-LICENSES.txt')
+    outputs.file(licenseFileProvider)
     doLast {
-        // The libraries the project depends on directly, e.g. "org.apache.pdfbox:pdfbox:3.0.8".
-        def libraries = runtime.resolvedConfiguration.firstLevelModuleDependencies
-                .collect { "${it.moduleGroup}:${it.moduleName}:${it.moduleVersion}".toString() }
-                .sort()
-        def libraryLines = libraries.collect { '            "' + it + '"' }.join(',\n')
+        // All libraries of the runtime classpath (direct and transitive), e.g. "org.apache.pdfbox:pdfbox:3.0.8",
+        // with the license declared in their POM (or a parent POM) as "name|url", in the same order.
+        def modules = new TreeMap<String, String>()
+        runtime.resolvedConfiguration.resolvedArtifacts.each {
+            def id = it.moduleVersion.id
+            modules.put("${id.group}:${id.name}".toString(), id.version)
+        }
+        // The POM comes from the Gradle cache (it was downloaded for the dependency resolution), so this works offline.
+        def pomFile = { String g, String a, String v ->
+            def result = project.dependencies.createArtifactResolutionQuery()
+                    .forModule(g, a, v)
+                    .withArtifacts(org.gradle.maven.MavenModule, org.gradle.maven.MavenPomArtifact)
+                    .execute()
+            def pom = result.resolvedComponents.collectMany { it.getArtifacts(org.gradle.maven.MavenPomArtifact) }
+                    .findAll { it instanceof org.gradle.api.artifacts.result.ResolvedArtifactResult }
+                    .collect { it.file }.find()
+            if (pom == null)
+                logger.warn("No POM for {}:{}:{}", g, a, v)
+            return pom
+        }
+        def readLicenses
+        readLicenses = { String g, String a, String v, int depth ->
+            def pom = pomFile(g, a, v)
+            if (pom == null)
+                return []
+            def xml = new XmlSlurper(false, false).parse(pom)
+            def found = xml.licenses.license.collect { [it.name.text().trim().replaceAll('\\s+', ' '), it.url.text().trim()] }
+            if (!found.isEmpty() || depth > 5 || xml.parent.size() == 0)
+                return found
+            return readLicenses(xml.parent.groupId.text().trim(), xml.parent.artifactId.text().trim(),
+                    xml.parent.version.text().trim(), depth + 1)
+        }
+        def quote = { String s -> '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"' }
+        def libraries = []
+        def licenses = []
+        modules.each { key, version ->
+            def (g, a) = key.split(':')
+            def found = readLicenses(g, a, version, 0)
+            libraries << "${key}:${version}".toString()
+            licenses << (found.isEmpty() ? '|' : found.collect { it[0] }.join(' or ') + '|' + found[0][1])
+        }
+        def libraryLines = libraries.collect { '            ' + quote(it) }.join(',\n')
+        def licenseLines = licenses.collect { '            ' + quote(it) }.join(',\n')
         def file = outputDir.get().file('com/bw/jPdfTool/BuildVersion.java').asFile
         file.parentFile.mkdirs()
         file.text = """package com.bw.jPdfTool;
 
 /**
- * Version, build date and libraries of the tool, written by the Gradle task generateVersion. Do not edit.
+ * Version, build date, libraries and their licenses of the tool, written by the Gradle task generateVersion. Do not edit.
  */
 public final class BuildVersion {
 
@@ -103,16 +150,44 @@ public final class BuildVersion {
     public static final String BUILD_DATE = "${buildDate}";
 
     /**
-     * The direct dependencies as "group:name:version".
+     * All libraries of the runtime classpath (direct and transitive) as "group:name:version", sorted.
      */
     public static final String[] LIBRARIES = {
 ${libraryLines}
+    };
+
+    /**
+     * The license of each library in LIBRARIES (same index) as "name|url", declared in the POM of the library.
+     * Both parts are empty if the POM declares none.
+     */
+    public static final String[] LICENSES = {
+${licenseLines}
     };
 
     private BuildVersion() {
     }
 }
 """
+        // The license overview for the distribution (MPL 2.0 asks to tell the recipients where the source is).
+        def lines = []
+        lines << "Third-party components of jPdfTool ${versionText}"
+        lines << ''
+        lines << 'Licenses as declared in the POM of each library (generated by the build).'
+        lines << ''
+        lines << 'veraPDF (org.verapdf:*) is dual-licensed under GPL-3.0 or MPL-2.0. jPdfTool uses it under the'
+        lines << 'Mozilla Public License 2.0 (https://www.mozilla.org/MPL/2.0/). jPdfTool does not modify veraPDF.'
+        lines << 'The source code of veraPDF is available at https://github.com/veraPDF/veraPDF-library'
+        lines << ''
+        libraries.eachWithIndex { lib, i ->
+            def parts = licenses[i].split('[|]', -1)
+            lines << lib
+            lines << "    ${parts[0] ?: 'unknown'}" + (parts.length > 1 && parts[1] ? " (${parts[1]})" : '')
+        }
+        lines << ''
+        lines << 'Arimo, Tinos, Cousine (fonts, embedded into PDF/A documents): Apache License 2.0'
+        def licenseFile = licenseFileProvider.get().asFile
+        licenseFile.parentFile.mkdirs()
+        licenseFile.text = lines.join(System.lineSeparator()) + System.lineSeparator()
     }
 }
 
@@ -193,7 +268,15 @@ tasks.register('bundleManual', Copy) {
     into layout.buildDirectory.dir('manual')
 }
 
+// The licenses of all libraries, generated by generateVersion.
+def thirdPartyLicenses = layout.buildDirectory.file('licenses/THIRD-PARTY-LICENSES.txt')
+
+tasks.matching { it.name in ['distZip', 'distTar', 'installDist'] }.configureEach { dependsOn 'generateVersion' }
+
 distributions.main.contents {
+    from(thirdPartyLicenses) {
+        into 'lib'
+    }
     from(tasks.named('bundleManual')) {
         into 'lib'
     }
@@ -245,12 +328,17 @@ tasks.register('distZipWithJre', Zip) {
     dependsOn(jlink)
     dependsOn(createExe)
     dependsOn(bundleManual)
+    dependsOn(generateVersion)
     from('build/launch4j')
     from('build/jre') {
         into 'jre'
     }
     from('build/libs') {
         include '*.jar'
+        into 'lib'
+    }
+    // The licenses of the libraries (MPL 2.0 of veraPDF asks to name the source) lie beside the jar.
+    from(thirdPartyLicenses) {
         into 'lib'
     }
     // The manual lies beside the jar.
